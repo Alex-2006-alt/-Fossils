@@ -14,6 +14,8 @@ function TimelineContent() {
   const [showUpload, setShowUpload] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedYear, setSelectedYear] = useState<string>("ALL");
 
   // Open upload modal if URL has ?upload=true
   useEffect(() => {
@@ -45,6 +47,30 @@ function TimelineContent() {
   // Flatten all photos from paginated data
   const allPhotos: PhotoItem[] =
     data?.pages.flatMap((page) => page.items) || [];
+
+  // Extract unique years from photos
+  const availableYears = Array.from(
+    new Set(
+      allPhotos
+        .map((p) => new Date(p.takenAt || p.uploadedAt).getFullYear().toString())
+        .filter(Boolean)
+    )
+  ).sort((a, b) => Number(b) - Number(a));
+
+  // Filtered photos based on search and year
+  const filteredPhotos = allPhotos.filter((p) => {
+    const q = searchQuery.toLowerCase().trim();
+    const matchesQuery =
+      !q ||
+      p.filename.toLowerCase().includes(q) ||
+      p.uploaderName.toLowerCase().includes(q) ||
+      (p.placeName && p.placeName.toLowerCase().includes(q));
+
+    const photoYear = new Date(p.takenAt || p.uploadedAt).getFullYear().toString();
+    const matchesYear = selectedYear === "ALL" || photoYear === selectedYear;
+
+    return matchesQuery && matchesYear;
+  });
 
   // Toggle favorite mutation
   const favoriteMutation = useMutation({
@@ -147,6 +173,129 @@ function TimelineContent() {
         </button>
       </div>
 
+      {/* Search & Year Filter Bar */}
+      <div
+        style={{
+          padding: "0 24px 18px",
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "12px",
+          alignItems: "center",
+        }}
+      >
+        {/* Search Input */}
+        <div style={{ position: "relative", flex: "1 1 240px", maxWidth: "360px" }}>
+          <span
+            style={{
+              position: "absolute",
+              left: "14px",
+              top: "50%",
+              transform: "translateY(-50%)",
+              fontSize: "14px",
+              opacity: 0.5,
+              pointerEvents: "none",
+            }}
+          >
+            🔍
+          </span>
+          <input
+            type="text"
+            placeholder="Search photos, people, places..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="input-field"
+            style={{
+              paddingLeft: "38px",
+              paddingRight: searchQuery ? "36px" : "16px",
+              paddingTop: "9px",
+              paddingBottom: "9px",
+              fontSize: "13px",
+              borderRadius: "12px",
+            }}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              style={{
+                position: "absolute",
+                right: "10px",
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                fontSize: "12px",
+                color: "var(--color-stone-400)",
+                padding: "4px",
+              }}
+              title="Clear search"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Year Filter Pills */}
+        {availableYears.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              gap: "6px",
+              overflowX: "auto",
+              alignItems: "center",
+            }}
+          >
+            <button
+              onClick={() => setSelectedYear("ALL")}
+              style={{
+                padding: "7px 14px",
+                borderRadius: "999px",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: "pointer",
+                border: "none",
+                background:
+                  selectedYear === "ALL"
+                    ? "var(--color-amber-500)"
+                    : "var(--color-surface-elevated)",
+                color:
+                  selectedYear === "ALL" ? "#ffffff" : "var(--color-stone-600)",
+                boxShadow:
+                  selectedYear === "ALL" ? "none" : "var(--shadow-xs)",
+                transition: "all 0.2s ease",
+              }}
+            >
+              All Years
+            </button>
+            {availableYears.map((yr) => (
+              <button
+                key={yr}
+                onClick={() => setSelectedYear(yr)}
+                style={{
+                  padding: "7px 14px",
+                  borderRadius: "999px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  border: "none",
+                  background:
+                    selectedYear === yr
+                      ? "var(--color-amber-500)"
+                      : "var(--color-surface-elevated)",
+                  color:
+                    selectedYear === yr ? "#ffffff" : "var(--color-stone-600)",
+                  boxShadow:
+                    selectedYear === yr ? "none" : "var(--shadow-xs)",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                {yr}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Loading Skeletons */}
       {isLoading ? (
         <div
@@ -170,7 +319,42 @@ function TimelineContent() {
         </div>
       ) : (
         <>
-          <PhotoGrid photos={allPhotos} onPhotoClick={handlePhotoClick} />
+          {allPhotos.length > 0 && filteredPhotos.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "60px 20px" }}>
+              <div style={{ fontSize: "40px", marginBottom: "12px" }}>🔍</div>
+              <h3
+                style={{
+                  fontSize: "18px",
+                  fontWeight: 700,
+                  color: "var(--color-stone-700)",
+                  margin: "0 0 6px",
+                }}
+              >
+                No matching photos
+              </h3>
+              <p
+                style={{
+                  fontSize: "14px",
+                  color: "var(--color-stone-400)",
+                  margin: "0 0 16px",
+                }}
+              >
+                Try searching for a different keyword or year.
+              </p>
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  setSelectedYear("ALL");
+                }}
+                className="btn-secondary"
+                style={{ fontSize: "13px", padding: "8px 16px" }}
+              >
+                Reset Filters
+              </button>
+            </div>
+          ) : (
+            <PhotoGrid photos={filteredPhotos} onPhotoClick={handlePhotoClick} />
+          )}
 
           {/* Infinite scroll sentinel */}
           {hasNextPage && (
@@ -208,7 +392,7 @@ function TimelineContent() {
 
       {/* Photo Viewer */}
       <PhotoViewer
-        photos={allPhotos}
+        photos={filteredPhotos}
         currentIndex={currentPhotoIndex}
         isOpen={viewerOpen}
         onClose={() => setViewerOpen(false)}
