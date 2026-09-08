@@ -1,0 +1,97 @@
+// FamVault — Prisma Schema
+// MVP: SQLite for zero-config local dev, swap to PostgreSQL for production
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String // bcrypt hashed
+  role      String   @default("MEMBER") // ADMIN | MEMBER | VIEWER
+  avatarUrl String?
+  familyId  String
+  family    Family   @relation(fields: [familyId], references: [id])
+  photos    Photo[]
+  favorites Favorite[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Family {
+  id         String   @id @default(cuid())
+  name       String
+  inviteCode String   @unique
+  members    User[]
+  albums     Album[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Photo {
+  id          String       @id @default(cuid())
+  filename    String
+  originalKey String // path to original file
+  thumbKey    String // path to thumbnail
+  mediumKey   String? // path to medium-res version
+  mimeType    String
+  width       Int
+  height      Int
+  sizeBytes   Int
+  takenAt     DateTime? // extracted from EXIF
+  uploadedAt  DateTime     @default(now())
+  latitude    Float?
+  longitude   Float?
+  placeName   String? // reverse-geocoded place name
+  exifData    String? // JSON string of EXIF metadata
+  blurHash    String? // blur hash for placeholder loading
+  uploaderId  String
+  uploader    User         @relation(fields: [uploaderId], references: [id])
+  albumPhotos AlbumPhoto[]
+  favorites   Favorite[]
+
+  @@index([uploadedAt])
+  @@index([takenAt])
+  @@index([uploaderId])
+}
+
+model Album {
+  id           String       @id @default(cuid())
+  title        String
+  description  String?
+  coverPhotoId String?
+  familyId     String
+  family       Family       @relation(fields: [familyId], references: [id])
+  photos       AlbumPhoto[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([familyId])
+}
+
+model AlbumPhoto {
+  albumId  String
+  album    Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  photoId  String
+  photo    Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  addedAt  DateTime @default(now())
+
+  @@id([albumId, photoId])
+}
+
+model Favorite {
+  userId  String
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  photoId String
+  photo   Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  addedAt DateTime @default(now())
+
+  @@id([userId, photoId])
+}

@@ -1,26 +1,295 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ═══════════════════════════════════════════════════════
+   FamVault Design System
+   Warm, premium, family-oriented photo platform
+   ═══════════════════════════════════════════════════════ */
+
+@theme {
+  /* ── Warm Neutral Palette ── */
+  --color-cream-50: #fefdfb;
+  --color-cream-100: #fdf9f3;
+  --color-cream-200: #f9f1e4;
+  --color-cream-300: #f3e4cc;
+
+  --color-stone-50: #faf9f7;
+  --color-stone-100: #f3f1ed;
+  --color-stone-200: #e5e2dc;
+  --color-stone-300: #d1cdc4;
+  --color-stone-400: #a9a49a;
+  --color-stone-500: #8a847a;
+  --color-stone-600: #6b665e;
+  --color-stone-700: #4d4942;
+  --color-stone-800: #2f2c28;
+  --color-stone-900: #1a1816;
+
+  /* ── Accent Colors ── */
+  --color-amber-400: #f5a623;
+  --color-amber-500: #e8961a;
+  --color-amber-600: #c47f14;
+  --color-rose-400: #e8657a;
+  --color-rose-500: #d94f66;
+  --color-sage-400: #7fba8a;
+  --color-sage-500: #5fa06c;
+  --color-sky-400: #5eb4d9;
+  --color-sky-500: #3d9cc4;
+
+  /* ── Surface Colors ── */
+  --color-surface-primary: #fefdfb;
+  --color-surface-secondary: #f9f7f4;
+  --color-surface-elevated: #ffffff;
+  --color-surface-glass: rgba(255, 255, 255, 0.72);
+
+  /* ── Dark Mode Surfaces ── */
+  --color-dark-bg: #121110;
+  --color-dark-surface: #1a1816;
+  --color-dark-elevated: #242220;
+  --color-dark-glass: rgba(26, 24, 22, 0.82);
+  --color-dark-border: #3a3733;
+
+  /* ── Spacing ── */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+  --spacing-3xl: 64px;
+
+  /* ── Typography ── */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+  --font-size-3xl: 1.875rem;
+  --font-size-4xl: 2.25rem;
+
+  /* ── Radius ── */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-full: 9999px;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
+  --shadow-xl: 0 24px 60px rgba(0,0,0,0.12), 0 8px 20px rgba(0,0,0,0.06);
+  --shadow-glow: 0 0 40px rgba(245, 166, 35, 0.15);
+
+  /* ── Animations ── */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 400ms;
+  --duration-slower: 600ms;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ═══════════════════════════════════════════════════════
+   Base Styles
+   ═══════════════════════════════════════════════════════ */
+
+* {
+  box-sizing: border-box;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-surface-primary);
+  color: var(--color-stone-800);
+  line-height: 1.6;
+  transition: background-color var(--duration-slow) var(--ease-out-expo),
+              color var(--duration-slow) var(--ease-out-expo);
+}
+
+/* ═══════════════════════════════════════════════════════
+   Dark Mode
+   ═══════════════════════════════════════════════════════ */
+
+.dark body,
+[data-theme="dark"] body {
+  background-color: var(--color-dark-bg);
+  color: var(--color-stone-200);
+}
+
+.dark .surface-primary { background-color: var(--color-dark-bg); }
+.dark .surface-secondary { background-color: var(--color-dark-surface); }
+.dark .surface-elevated { background-color: var(--color-dark-elevated); }
+
+/* ═══════════════════════════════════════════════════════
+   Glassmorphism
+   ═══════════════════════════════════════════════════════ */
+
+.glass {
+  background: var(--color-surface-glass);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.dark .glass {
+  background: var(--color-dark-glass);
+  border-color: var(--color-dark-border);
+}
+
+/* ═══════════════════════════════════════════════════════
+   Skeleton Loading
+   ═══════════════════════════════════════════════════════ */
+
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-stone-100) 25%,
+    var(--color-stone-50) 37%,
+    var(--color-stone-100) 63%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+  border-radius: var(--radius-md);
+}
+
+.dark .skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-dark-surface) 25%,
+    var(--color-dark-elevated) 37%,
+    var(--color-dark-surface) 63%
+  );
+  background-size: 200% 100%;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Scrollbar
+   ═══════════════════════════════════════════════════════ */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-stone-300);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-stone-400);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: var(--color-dark-border);
+}
+
+/* ═══════════════════════════════════════════════════════
+   Utility Classes
+   ═══════════════════════════════════════════════════════ */
+
+.fade-in {
+  animation: fadeIn var(--duration-slow) var(--ease-out-expo) forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--color-amber-400), var(--color-amber-600));
+  color: white;
+  font-weight: 600;
+  border: none;
+  border-radius: var(--radius-lg);
+  padding: 12px 28px;
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-out-expo);
+  box-shadow: var(--shadow-sm), 0 2px 8px rgba(245, 166, 35, 0.25);
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md), 0 4px 16px rgba(245, 166, 35, 0.35);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  background: var(--color-surface-elevated);
+  color: var(--color-stone-700);
+  font-weight: 500;
+  border: 1px solid var(--color-stone-200);
+  border-radius: var(--radius-lg);
+  padding: 12px 28px;
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-out-expo);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-secondary:hover {
+  border-color: var(--color-stone-300);
+  box-shadow: var(--shadow-md);
+}
+
+.dark .btn-secondary {
+  background: var(--color-dark-elevated);
+  color: var(--color-stone-200);
+  border-color: var(--color-dark-border);
+}
+
+.input-field {
+  width: 100%;
+  padding: 14px 18px;
+  border: 1.5px solid var(--color-stone-200);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  font-family: var(--font-sans);
+  background: var(--color-surface-elevated);
+  color: var(--color-stone-800);
+  transition: all var(--duration-normal) var(--ease-out-expo);
+  outline: none;
+}
+
+.input-field:focus {
+  border-color: var(--color-amber-400);
+  box-shadow: 0 0 0 3px rgba(245, 166, 35, 0.12);
+}
+
+.input-field::placeholder {
+  color: var(--color-stone-400);
+}
+
+.dark .input-field {
+  background: var(--color-dark-surface);
+  border-color: var(--color-dark-border);
+  color: var(--color-stone-200);
+}
+
+.dark .input-field:focus {
+  border-color: var(--color-amber-500);
+  box-shadow: 0 0 0 3px rgba(245, 166, 35, 0.2);
 }
