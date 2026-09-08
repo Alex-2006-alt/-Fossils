@@ -22,6 +22,7 @@ export default function PhotoViewer({
   onToggleFavorite,
 }: PhotoViewerProps) {
   const [showInfo, setShowInfo] = useState(false);
+  const [isSlideshow, setIsSlideshow] = useState(false);
   const [direction, setDirection] = useState(0);
 
   const photo = photos[currentIndex];
@@ -40,6 +41,21 @@ export default function PhotoViewer({
     }
   }, [currentIndex, onNavigate]);
 
+  // Slideshow auto-advance
+  useEffect(() => {
+    if (!isOpen || !isSlideshow || photos.length <= 1) return;
+    const interval = setInterval(() => {
+      setDirection(1);
+      onNavigate(currentIndex < photos.length - 1 ? currentIndex + 1 : 0);
+    }, 3500);
+    return () => clearInterval(interval);
+  }, [isOpen, isSlideshow, currentIndex, photos.length, onNavigate]);
+
+  // Reset slideshow on close
+  useEffect(() => {
+    if (!isOpen) setIsSlideshow(false);
+  }, [isOpen]);
+
   // Keyboard navigation
   useEffect(() => {
     if (!isOpen) return;
@@ -54,6 +70,10 @@ export default function PhotoViewer({
           break;
         case "Escape":
           onClose();
+          break;
+        case " ":
+          e.preventDefault();
+          setIsSlideshow((prev) => !prev);
           break;
         case "i":
           setShowInfo((prev) => !prev);
@@ -134,7 +154,33 @@ export default function PhotoViewer({
               {currentIndex + 1} / {photos.length}
             </span>
 
-            <div style={{ display: "flex", gap: "8px" }}>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <button
+                onClick={() => setIsSlideshow((prev) => !prev)}
+                style={{
+                  background: isSlideshow
+                    ? "rgba(245, 166, 35, 0.4)"
+                    : "rgba(255,255,255,0.1)",
+                  border: isSlideshow
+                    ? "1px solid var(--color-amber-400)"
+                    : "1px solid transparent",
+                  borderRadius: "10px",
+                  padding: "8px 14px",
+                  cursor: "pointer",
+                  color: "white",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  transition: "all 0.2s",
+                }}
+                title="Toggle Slideshow (Space)"
+              >
+                <span>{isSlideshow ? "⏸️" : "▶️"}</span>
+                <span>{isSlideshow ? "Pause" : "Slideshow"}</span>
+              </button>
+
               <button
                 onClick={() => onToggleFavorite(photo.id)}
                 style={{
