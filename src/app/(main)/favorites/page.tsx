@@ -13,22 +13,21 @@ function FavoritesContent() {
 
   const { data, isLoading } = useInfiniteQuery({
     queryKey: ["photos"],
-    queryFn: async ({ pageParam }: { pageParam: string | null }) => {
+    queryFn: async ({ pageParam }: { pageParam: string | null }): Promise<{ items: PhotoItem[]; nextCursor: string | null }> => {
       const params = new URLSearchParams({ limit: "50" });
       if (pageParam) params.set("cursor", pageParam);
       const res = await fetch(`/api/photos?${params}`);
       if (!res.ok) throw new Error("Failed to fetch photos");
       return res.json();
     },
-    getNextPageParam: (lastPage: { nextCursor: string | null }) =>
-      lastPage.nextCursor,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     initialPageParam: null as string | null,
   });
 
   // Filter only favorites
   const allPhotos: PhotoItem[] =
     data?.pages
-      .flatMap((page: { items: PhotoItem[] }) => page.items)
+      .flatMap((page) => page.items)
       .filter((p) => p.isFavorite) || [];
 
   const favoriteMutation = useMutation({

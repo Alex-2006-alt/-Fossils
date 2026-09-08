@@ -31,21 +31,20 @@ function TimelineContent() {
     isLoading,
   } = useInfiniteQuery({
     queryKey: ["photos"],
-    queryFn: async ({ pageParam }: { pageParam: string | null }) => {
+    queryFn: async ({ pageParam }: { pageParam: string | null }): Promise<{ items: PhotoItem[]; nextCursor: string | null }> => {
       const params = new URLSearchParams({ limit: "50" });
       if (pageParam) params.set("cursor", pageParam);
       const res = await fetch(`/api/photos?${params}`);
       if (!res.ok) throw new Error("Failed to fetch photos");
       return res.json();
     },
-    getNextPageParam: (lastPage: { nextCursor: string | null }) =>
-      lastPage.nextCursor,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     initialPageParam: null as string | null,
   });
 
   // Flatten all photos from paginated data
   const allPhotos: PhotoItem[] =
-    data?.pages.flatMap((page: { items: PhotoItem[] }) => page.items) || [];
+    data?.pages.flatMap((page) => page.items) || [];
 
   // Toggle favorite mutation
   const favoriteMutation = useMutation({

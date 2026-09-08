@@ -39,14 +39,16 @@ export async function processImage(buffer: Buffer): Promise<ProcessedImage> {
       const parsed = exifReader(rawMetadata.exif);
 
       if (parsed?.Photo?.DateTimeOriginal) {
-        takenAt = new Date(parsed.Photo.DateTimeOriginal as string);
+        const dto = parsed.Photo.DateTimeOriginal;
+        takenAt = dto instanceof Date ? dto : new Date(String(dto));
       } else if (parsed?.Image?.DateTime) {
-        takenAt = new Date(parsed.Image.DateTime as string);
+        const dt = parsed.Image.DateTime;
+        takenAt = dt instanceof Date ? dt : new Date(String(dt));
       }
 
       if (parsed?.GPSInfo?.GPSLatitude && parsed?.GPSInfo?.GPSLongitude) {
-        latitude = parsed.GPSInfo.GPSLatitude as number;
-        longitude = parsed.GPSInfo.GPSLongitude as number;
+        latitude = Number(parsed.GPSInfo.GPSLatitude as unknown);
+        longitude = Number(parsed.GPSInfo.GPSLongitude as unknown);
       }
 
       exifData = {
