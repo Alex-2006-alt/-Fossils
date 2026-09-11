@@ -75,7 +75,7 @@ export async function logAudit(params: LogAuditParams): Promise<void> {
         action: params.action,
         resourceType: params.resourceType || null,
         resourceId: params.resourceId || null,
-        details: params.details ? (params.details as unknown as import("@prisma/client").Prisma.InputJsonValue) : undefined,
+        details: params.details ? JSON.stringify(params.details) : undefined,
         ipAddress: params.ipAddress || null,
         userAgent: params.userAgent || null,
       },

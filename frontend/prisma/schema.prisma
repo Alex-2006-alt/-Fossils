@@ -5,13 +5,11 @@
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider   = "postgresql"
+  provider   = "sqlite"
   url        = env("DATABASE_URL")
-  extensions = [vector, pgcrypto]
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -106,7 +104,7 @@ model Media {
   latitude         Float?
   longitude        Float?
   placeName        String?   // reverse-geocoded
-  exifData         Json?     // full EXIF as JSON
+  exifData         String?   // JSON string of full EXIF
   blurHash         String?   // blurhash placeholder
   checksum         String?   // SHA-256 for exact duplicate detection
   pHash            String?   // perceptual hash for near-duplicate detection
@@ -196,7 +194,7 @@ model Face {
   media      Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
   personId   String?
   person     Person?  @relation(fields: [personId], references: [id], onDelete: SetNull)
-  bbox       Json     // {x, y, w, h} normalized 0-1
+  bbox       String   @default("{}") // JSON string {x, y, w, h} normalized 0-1
   cropKey    String?  // R2 key for face crop image
   confidence Float    @default(0)
   isVerified Boolean  @default(false) // user-confirmed match
@@ -275,7 +273,7 @@ model Memory {
   dateTo       DateTime
   locationName String?
   mediaCount   Int      @default(0)
-  peopleIds    String[] // array of Person IDs
+  peopleIds    String   @default("[]") // JSON array of Person IDs
   status       String   @default("DRAFT") // DRAFT | PUBLISHED | ARCHIVED
   isAuto       Boolean  @default(true)
   createdAt    DateTime @default(now())
@@ -350,7 +348,7 @@ model FeedEvent {
   userId    String   // who triggered this event
   type      String   // UPLOAD | MEMORY_CREATED | MILESTONE | CAPSULE_UNLOCKED | ALBUM_CREATED
   title     String
-  mediaIds  String[] // relevant media IDs for preview
+  mediaIds  String   @default("[]") // JSON array of media IDs
   createdAt DateTime @default(now())
 
   // Relations
@@ -391,7 +389,7 @@ model FamilyTreeNode {
   displayName  String
   birthday     DateTime?
   relationship String    // GRANDPARENT | PARENT | CHILD | SIBLING | SPOUSE | OTHER
-  parentIds    String[]  // array of FamilyTreeNode IDs
+  parentIds    String   @default("[]") // JSON array of FamilyTreeNode IDs
   photoMediaId String?   // cover photo
   createdAt    DateTime  @default(now())
 
@@ -429,7 +427,7 @@ model MemoryCapsule {
   title       String
   message     String?
   voiceKey    String?  // R2 key for voice recording
-  mediaIds    String[]
+  mediaIds    String   @default("[]") // JSON array of media IDs
   unlocksAt   DateTime
   isUnlocked  Boolean  @default(false)
   createdAt   DateTime @default(now())
@@ -465,7 +463,7 @@ model SearchEmbedding {
   mediaId   String   @unique
   media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
   caption   String?  // BLIP-generated caption
-  tags      String[] // scene/object tags
+  tags      String   @default("[]") // JSON array of scene/object tags
   createdAt DateTime @default(now())
 
   @@index([mediaId])
@@ -503,7 +501,7 @@ model AuditLog {
   action       String   // LOGIN | UPLOAD | DELETE | ROLE_CHANGE | INVITE | SETTINGS_CHANGE | etc
   resourceType String?  // MEDIA | ALBUM | PERSON | MEMBER | etc
   resourceId   String?
-  details      Json?    // extra context
+  details      String?  // JSON string for extra context
   ipAddress    String?
   userAgent    String?
   createdAt    DateTime @default(now())
