@@ -1,34 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { withFamilyAuth, getClientIp } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { getPublicUrl } from "@/lib/storage";
+import { logAudit } from "@/lib/audit";
 
 /**
  * GET /api/albums — List all albums for the family.
  */
-export async function GET() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id as string },
-  });
-
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
+export const GET = withFamilyAuth(async (req, ctx) => {
   const albums = await prisma.album.findMany({
-    where: { familyId: user.familyId },
+    where: { familyId: ctx.familyId },
     orderBy: { createdAt: "desc" },
     include: {
-      _count: { select: { photos: true } },
-      photos: {
+      _count: { select: { media: true } },
+      media: {
         take: 1,
+        orderBy: { addedAt: "desc" },
         include: {
-          photo: { select: { thumbKey: true } },
+          media: { select: { thumbKey: true } },
         },
       },
     },
@@ -38,62 +27,67 @@ export async function GET() {
     id: album.id,
     title: album.title,
     description: album.description,
+    type: album.type,
     coverUrl:
-      album.photos[0]?.photo?.thumbKey
-        ? getPublicUrl(album.photos[0].photo.thumbKey, "thumbs")
+      album.media[0]?.media?.thumbKey
+        ? getPublicUrl(album.media[0].media.thumbKey)
         : null,
-    photoCount: album._count.photos,
+    photoCount: album._count.media,
     createdAt: album.createdAt.toISOString(),
   }));
 
   return NextResponse.json({ items });
-}
+});
 
 /**
  * POST /api/albums — Create a new album.
+ * Requires MEMBER role or higher.
  */
-export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export const POST = withFamilyAuth(
+  async (req: NextRequest, ctx) => {
+    const { title, description, photoIds } = await req.json();
 
-  const { title, description, photoIds } = await req.json();
+    if (!title) {
+      return NextResponse.json(
+        { error: "Album title is required" },
+        { status: 400 }
+      );
+    }
 
-  if (!title) {
+    const album = await prisma.album.create({
+      data: {
+        title,
+        description: description || null,
+        familyId: ctx.familyId,
+        type: "MANUAL",
+        ...(photoIds?.length
+          ? {
+              media: {
+                create: photoIds.map((mediaId: string, index: number) => ({
+                  mediaId,
+                  order: index,
+                })),
+              },
+            }
+          : {}),
+      },
+    });
+
+    // Audit log
+    await logAudit({
+      familyId: ctx.familyId,
+      userId: ctx.userId,
+      action: "ALBUM_CREATE",
+      resourceType: "ALBUM",
+      resourceId: album.id,
+      details: { title: album.title, photoCount: photoIds?.length || 0 },
+      ipAddress: getClientIp(req),
+    });
+
     return NextResponse.json(
-      { error: "Album title is required" },
-      { status: 400 }
+      { id: album.id, title: album.title },
+      { status: 201 }
     );
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id as string },
-  });
-
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
-  const album = await prisma.album.create({
-    data: {
-      title,
-      description: description || null,
-      familyId: user.familyId,
-      ...(photoIds?.length
-        ? {
-            photos: {
-              create: photoIds.map((photoId: string) => ({
-                photoId,
-              })),
-            },
-          }
-        : {}),
-    },
-  });
-
-  return NextResponse.json(
-    { id: album.id, title: album.title },
-    { status: 201 }
-  );
-}
+  },
+  { minRole: "MEMBER" }
+);
