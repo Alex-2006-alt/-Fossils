@@ -143,22 +143,38 @@ export default function PhotoGrid({ photos, onPhotoClick }: PhotoGridProps) {
                     />
                   )}
 
-                  {/* Actual image */}
-                  <img
-                    src={photo.thumbUrl}
-                    alt={photo.filename}
-                    loading="lazy"
-                    onLoad={() =>
-                      setLoadedImages((prev) => new Set(prev).add(photo.id))
-                    }
-                    style={{
+                  {/* Actual image or Processing State */}
+                  {photo.thumbUrl ? (
+                    <img
+                      src={photo.thumbUrl}
+                      alt={photo.filename}
+                      loading="lazy"
+                      onLoad={() =>
+                        setLoadedImages((prev) => new Set(prev).add(photo.id))
+                      }
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        opacity: isLoaded ? 1 : 0,
+                        transition: "opacity 0.3s ease",
+                      }}
+                    />
+                  ) : (
+                    <div style={{
                       width: "100%",
                       height: "100%",
-                      objectFit: "cover",
-                      opacity: isLoaded ? 1 : 0,
-                      transition: "opacity 0.3s ease",
-                    }}
-                  />
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: "var(--color-stone-200)",
+                      color: "var(--color-stone-500)",
+                      fontSize: "12px",
+                      fontWeight: 500,
+                    }}>
+                      Processing...
+                    </div>
+                  )}
 
                   {/* Hover Overlay */}
                   <motion.div

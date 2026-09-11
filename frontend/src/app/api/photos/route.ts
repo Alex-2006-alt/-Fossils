@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withFamilyAuth, getClientIp } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
-import { processImage } from "@/lib/image-processing";
 import {
   ensureUploadDirs,
   generateStorageKey,
@@ -9,6 +8,7 @@ import {
   getPublicUrl,
 } from "@/lib/storage";
 import { logAudit } from "@/lib/audit";
+import { mediaQueue } from "@/lib/queue";
 
 /**
  * GET /api/photos — List photos for the user's family, grouped by date.
@@ -99,44 +99,46 @@ export const POST = withFamilyAuth(
         const buffer = Buffer.from(await file.arrayBuffer());
         const key = generateStorageKey(file.name, "originals");
 
-        // Process image: extract EXIF, generate thumbnails
-        const processed = await processImage(buffer);
+        // Save original version
+        await saveFile(key, buffer, file.type);
 
-        // Generate keys for different sizes
-        const thumbKey = key.replace("originals/", "thumbs/");
-        const mediumKey = key.replace("originals/", "medium/");
-
-        // Save all versions
-        await saveFile(key, processed.original, "image/jpeg");
-        await saveFile(thumbKey, processed.thumb, "image/jpeg");
-        await saveFile(mediumKey, processed.medium, "image/jpeg");
-
-        // Save to database
+        // Save to database as UPLOADED
         const photo = await prisma.media.create({
           data: {
             filename: file.name,
             originalKey: key,
-            thumbKey: thumbKey,
-            mediumKey: mediumKey,
+            thumbKey: "", // Will be filled by worker
+            mediumKey: null,
             mimeType: file.type,
-            width: processed.metadata.width,
-            height: processed.metadata.height,
+            width: 0,
+            height: 0,
             sizeBytes: buffer.length,
-            takenAt: processed.metadata.takenAt,
-            latitude: processed.metadata.latitude,
-            longitude: processed.metadata.longitude,
-            exifData: processed.metadata.exifData
-              ? (processed.metadata.exifData as unknown as import("@prisma/client").Prisma.InputJsonValue)
-              : undefined,
             uploaderId: ctx.userId,
-            processingStatus: "READY", // For MVP, mark as ready immediately
+            processingStatus: "UPLOADED",
           },
+        });
+
+        // Create processing job
+        await prisma.mediaProcessingJob.create({
+          data: {
+            mediaId: photo.id,
+            step: "THUMBNAIL",
+            status: "PENDING",
+          },
+        });
+
+        // Enqueue to BullMQ
+        await mediaQueue.add("process-media", {
+          mediaId: photo.id,
+          key,
+          filename: file.name,
         });
 
         results.push({
           id: photo.id,
           filename: photo.filename,
-          thumbUrl: getPublicUrl(thumbKey),
+          thumbUrl: null, // UI will poll or handle pending state
+          status: "UPLOADED",
         });
       }
 
