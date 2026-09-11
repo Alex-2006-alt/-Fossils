@@ -3,6 +3,10 @@ import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "./db";
 
+// ════════════════════════════════════════════════════════════
+// FamVault — Auth Configuration (NextAuth v5)
+// ════════════════════════════════════════════════════════════
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
     Credentials({
