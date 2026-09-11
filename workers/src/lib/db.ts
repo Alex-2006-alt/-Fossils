@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../../frontend/node_modules/@prisma/client';
 import path from 'path';
 
 // Since the DB is in the frontend folder, we override the URL

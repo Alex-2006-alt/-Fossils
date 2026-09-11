@@ -233,3 +233,40 @@ async function deleteFromR2(key: string): Promise<void> {
     })
   );
 }
+
+// ════════════════════════════════════════════════════════════
+// Worker helpers
+// ════════════════════════════════════════════════════════════
+
+export async function getFileBuffer(key: string): Promise<Buffer | null> {
+  if (STORAGE_PROVIDER === "r2") {
+    return getBufferFromR2(key);
+  }
+  return getBufferFromLocal(key);
+}
+
+async function getBufferFromLocal(key: string): Promise<Buffer | null> {
+  try {
+    const filePath = path.join(UPLOAD_BASE, key);
+    return await fs.readFile(filePath);
+  } catch (error) {
+    return null;
+  }
+}
+
+async function getBufferFromR2(key: string): Promise<Buffer | null> {
+  try {
+    const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+    const client = await getS3Client();
+    const response = await client.send(
+      new GetObjectCommand({
+        Bucket: process.env.R2_BUCKET_NAME!,
+        Key: key,
+      })
+    );
+    if (!response.Body) return null;
+    return Buffer.from(await response.Body.transformToByteArray());
+  } catch (error) {
+    return null;
+  }
+}
