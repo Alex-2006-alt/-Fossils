@@ -5,10 +5,11 @@ import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
 
 const navItems = [
-  { href: "/timeline", label: "Timeline", icon: "📅" },
-  { href: "/albums", label: "Albums", icon: "📁" },
+  { href: "/home", label: "Home", icon: "🏠" },
+  { href: "/timeline", label: "Timeline", icon: "🕒" },
   { href: "/timeline?upload=true", label: "Upload", icon: "➕", isUpload: true },
-  { href: "/favorites", label: "Favorites", icon: "❤️" },
+  { href: "/memories", label: "Memories", icon: "✨" },
+  { href: "/search", label: "Search", icon: "🔍" },
 ];
 
 export default function MobileNav() {

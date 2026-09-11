@@ -7,8 +7,14 @@ import { motion } from "framer-motion";
 import { useTheme } from "./Providers";
 
 const navItems = [
-  { href: "/timeline", label: "Timeline", icon: "📅" },
-  { href: "/albums", label: "Albums", icon: "📁" },
+  { href: "/home", label: "Home", icon: "🏠" },
+  { href: "/timeline", label: "Timeline", icon: "🕒" },
+  { href: "/people", label: "People", icon: "👥" },
+  { href: "/places", label: "Places", icon: "📍" },
+  { href: "/albums", label: "Albums", icon: "📚" },
+  { href: "/memories", label: "Memories", icon: "✨" },
+  { href: "/search", label: "Search", icon: "🔍" },
+  { href: "/family", label: "Family", icon: "🌳" },
   { href: "/favorites", label: "Favorites", icon: "❤️" },
 ];
 

@@ -1,40 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { withFamilyAuth } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 
 /**
  * POST /api/photos/[id]/favorite — Toggle favorite status.
  */
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export const POST = withFamilyAuth(async (req: NextRequest, ctx, params) => {
+  const id = params?.id;
+  if (!id) {
+    return NextResponse.json({ error: "Missing photo ID" }, { status: 400 });
   }
 
-  const { id } = await params;
-  const userId = session.user.id as string;
+  // Verify photo belongs to user's family
+  const photo = await prisma.media.findUnique({
+    where: { id },
+    include: { uploader: { select: { familyId: true } } },
+  });
 
-  // Check if already favorited
+  if (!photo || photo.uploader.familyId !== ctx.familyId) {
+    return NextResponse.json({ error: "Photo not found" }, { status: 404 });
+  }
+
+  // Toggle favorite
   const existing = await prisma.favorite.findUnique({
     where: {
-      userId_photoId: { userId, photoId: id },
+      userId_mediaId: { userId: ctx.userId, mediaId: id },
     },
   });
 
   if (existing) {
     await prisma.favorite.delete({
       where: {
-        userId_photoId: { userId, photoId: id },
+        userId_mediaId: { userId: ctx.userId, mediaId: id },
       },
     });
     return NextResponse.json({ favorited: false });
   } else {
     await prisma.favorite.create({
-      data: { userId, photoId: id },
+      data: { userId: ctx.userId, mediaId: id },
     });
     return NextResponse.json({ favorited: true });
   }
-}
+});
