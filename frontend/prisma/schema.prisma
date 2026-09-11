@@ -198,11 +198,8 @@ model Face {
   cropKey    String?  // R2 key for face crop image
   confidence Float    @default(0)
   isVerified Boolean  @default(false) // user-confirmed match
+  descriptor String?  // 128-d float array JSON string for in-memory SQLite clustering
   createdAt  DateTime @default(now())
-
-  // Note: face embedding vector stored in search_embeddings or a dedicated
-  // face_embeddings table via raw SQL (pgvector), since Prisma doesn't
-  // natively support vector columns. We use raw queries for similarity search.
 
   @@index([mediaId])
   @@index([personId])
