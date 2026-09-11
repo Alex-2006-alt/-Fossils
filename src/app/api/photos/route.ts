@@ -1,42 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { withFamilyAuth, getClientIp } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { processImage } from "@/lib/image-processing";
 import {
   ensureUploadDirs,
   generateStorageKey,
-  saveOriginal,
-  saveThumbnail,
-  saveMedium,
+  saveFile,
   getPublicUrl,
 } from "@/lib/storage";
+import { logAudit } from "@/lib/audit";
 
 /**
  * GET /api/photos — List photos for the user's family, grouped by date.
+ * Scoped to the authenticated user's family.
  */
-export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export const GET = withFamilyAuth(async (req, ctx) => {
   const { searchParams } = new URL(req.url);
   const cursor = searchParams.get("cursor");
   const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100);
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-  });
-
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
-  // Fetch photos for the family
-  const photos = await prisma.photo.findMany({
+  // All queries scoped to family via uploader's familyId
+  const photos = await prisma.media.findMany({
     where: {
       uploader: {
-        familyId: user.familyId,
+        familyId: ctx.familyId,
       },
     },
     orderBy: [
@@ -48,7 +35,7 @@ export async function GET(req: NextRequest) {
     include: {
       uploader: { select: { name: true } },
       favorites: {
-        where: { userId: session.user.id as string },
+        where: { userId: ctx.userId },
         select: { userId: true },
       },
     },
@@ -60,11 +47,11 @@ export async function GET(req: NextRequest) {
   const photoItems = items.map((photo) => ({
     id: photo.id,
     filename: photo.filename,
-    thumbUrl: getPublicUrl(photo.thumbKey, "thumbs"),
+    thumbUrl: getPublicUrl(photo.thumbKey),
     mediumUrl: photo.mediumKey
-      ? getPublicUrl(photo.mediumKey, "medium")
-      : getPublicUrl(photo.originalKey, "originals"),
-    originalUrl: getPublicUrl(photo.originalKey, "originals"),
+      ? getPublicUrl(photo.mediumKey)
+      : getPublicUrl(photo.originalKey),
+    originalUrl: getPublicUrl(photo.originalKey),
     width: photo.width,
     height: photo.height,
     takenAt: (photo.takenAt || photo.uploadedAt).toISOString(),
@@ -72,90 +59,105 @@ export async function GET(req: NextRequest) {
     placeName: photo.placeName,
     isFavorite: photo.favorites.length > 0,
     uploaderName: photo.uploader.name,
-    exifData: photo.exifData ? JSON.parse(photo.exifData) : null,
+    processingStatus: photo.processingStatus,
+    exifData: photo.exifData || null,
   }));
 
   return NextResponse.json({
     items: photoItems,
     nextCursor: hasMore ? items[items.length - 1].id : null,
   });
-}
+});
 
 /**
  * POST /api/photos — Upload one or more photos.
+ * Requires MEMBER role or higher.
  */
-export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export const POST = withFamilyAuth(
+  async (req: NextRequest, ctx) => {
+    try {
+      await ensureUploadDirs();
 
-  try {
-    await ensureUploadDirs();
+      const formData = await req.formData();
+      const files = formData.getAll("files") as File[];
 
-    const formData = await req.formData();
-    const files = formData.getAll("files") as File[];
-
-    if (files.length === 0) {
-      return NextResponse.json(
-        { error: "No files provided" },
-        { status: 400 }
-      );
-    }
-
-    const results = [];
-
-    for (const file of files) {
-      // Validate file type
-      if (!file.type.startsWith("image/")) {
-        continue; // Skip non-image files for now
+      if (files.length === 0) {
+        return NextResponse.json(
+          { error: "No files provided" },
+          { status: 400 }
+        );
       }
 
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const key = generateStorageKey(file.name);
+      const results = [];
 
-      // Process image: extract EXIF, generate thumbnails
-      const processed = await processImage(buffer);
+      for (const file of files) {
+        // Validate file type
+        if (!file.type.startsWith("image/")) {
+          continue; // Skip non-image files for now
+        }
 
-      // Save all versions
-      await saveOriginal(key, processed.original);
-      await saveThumbnail(key, processed.thumb);
-      await saveMedium(key, processed.medium);
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const key = generateStorageKey(file.name, "originals");
 
-      // Save to database
-      const photo = await prisma.photo.create({
-        data: {
-          filename: file.name,
-          originalKey: key,
-          thumbKey: key,
-          mediumKey: key,
-          mimeType: file.type,
-          width: processed.metadata.width,
-          height: processed.metadata.height,
-          sizeBytes: buffer.length,
-          takenAt: processed.metadata.takenAt,
-          latitude: processed.metadata.latitude,
-          longitude: processed.metadata.longitude,
-          exifData: processed.metadata.exifData
-            ? JSON.stringify(processed.metadata.exifData)
-            : null,
-          uploaderId: session.user.id as string,
-        },
+        // Process image: extract EXIF, generate thumbnails
+        const processed = await processImage(buffer);
+
+        // Generate keys for different sizes
+        const thumbKey = key.replace("originals/", "thumbs/");
+        const mediumKey = key.replace("originals/", "medium/");
+
+        // Save all versions
+        await saveFile(key, processed.original, "image/jpeg");
+        await saveFile(thumbKey, processed.thumb, "image/jpeg");
+        await saveFile(mediumKey, processed.medium, "image/jpeg");
+
+        // Save to database
+        const photo = await prisma.media.create({
+          data: {
+            filename: file.name,
+            originalKey: key,
+            thumbKey: thumbKey,
+            mediumKey: mediumKey,
+            mimeType: file.type,
+            width: processed.metadata.width,
+            height: processed.metadata.height,
+            sizeBytes: buffer.length,
+            takenAt: processed.metadata.takenAt,
+            latitude: processed.metadata.latitude,
+            longitude: processed.metadata.longitude,
+            exifData: processed.metadata.exifData
+              ? (processed.metadata.exifData as unknown as import("@prisma/client").Prisma.InputJsonValue)
+              : undefined,
+            uploaderId: ctx.userId,
+            processingStatus: "READY", // For MVP, mark as ready immediately
+          },
+        });
+
+        results.push({
+          id: photo.id,
+          filename: photo.filename,
+          thumbUrl: getPublicUrl(thumbKey),
+        });
+      }
+
+      // Audit log
+      await logAudit({
+        familyId: ctx.familyId,
+        userId: ctx.userId,
+        action: "UPLOAD",
+        resourceType: "MEDIA",
+        details: { count: results.length, filenames: results.map((r) => r.filename) },
+        ipAddress: getClientIp(req),
       });
 
-      results.push({
-        id: photo.id,
-        filename: photo.filename,
-        thumbUrl: getPublicUrl(key, "thumbs"),
-      });
+      return NextResponse.json({ uploaded: results }, { status: 201 });
+    } catch (error) {
+      console.error("Upload error:", error);
+      return NextResponse.json(
+        { error: "Upload failed" },
+        { status: 500 }
+      );
     }
-
-    return NextResponse.json({ uploaded: results }, { status: 201 });
-  } catch (error) {
-    console.error("Upload error:", error);
-    return NextResponse.json(
-      { error: "Upload failed" },
-      { status: 500 }
-    );
-  }
-}
+  },
+  { minRole: "MEMBER" }
+);
