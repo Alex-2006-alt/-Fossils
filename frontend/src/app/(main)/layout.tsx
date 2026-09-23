@@ -1,11 +1,12 @@
 "use client";
-
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
-import Sidebar from "@/components/Sidebar";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import Sidebar, { navigation } from "@/components/Sidebar";
 import MobileNav from "@/components/MobileNav";
-
+import Dialog from "@/components/Dialog";
+import Icon from "@/components/Icon";
 export default function MainLayout({
   children,
 }: {
@@ -13,76 +14,72 @@ export default function MainLayout({
 }) {
   const { data: session, status } = useSession();
   const router = useRouter();
-
+  const pathname = usePathname();
+  const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => {
-    if (status === "unauthenticated") {
-      router.push("/login");
-    }
+    if (status === "unauthenticated") router.replace("/login");
   }, [status, router]);
-
-  if (status === "loading") {
+  if (status === "loading")
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "var(--color-surface-primary)",
-        }}
-      >
-        <div
-          style={{
-            width: "40px",
-            height: "40px",
-            border: "3px solid var(--color-stone-200)",
-            borderTopColor: "var(--color-amber-400)",
-            borderRadius: "50%",
-            animation: "spin 0.8s linear infinite",
-          }}
-        />
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <div className="app-loading">
+        <span className="brand-mark">
+          <Icon name="album" size={28} />
+        </span>
+        <p>Opening your archive…</p>
       </div>
     );
-  }
-
   if (!session) return null;
-
+  const current = navigation.find(
+    (item) => pathname === item.href || pathname.startsWith(item.href + "/"),
+  );
   return (
-    <div
-      style={{
-        display: "flex",
-        minHeight: "100vh",
-        background: "var(--color-surface-secondary)",
-      }}
-    >
-      {/* Desktop Sidebar */}
-      <Sidebar />
-
-      {/* Main Content */}
-      <main
-        style={{
-          flex: 1,
-          marginLeft: "280px",
-          paddingBottom: "80px",
-          minHeight: "100vh",
-          transition: "margin var(--duration-normal) var(--ease-out-expo)",
-        }}
-        className="main-content"
+    <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
+      <div className="desktop-navigation">
+        <Sidebar />
+      </div>
+      <div className="workspace">
+        <header className="workspace-bar">
+          <span className="breadcrumb">
+            Your archive <span>/</span>{" "}
+            <strong>{current?.label || "Collection"}</strong>
+          </span>
+          <div className="bar-actions">
+            <Link
+              href="/search"
+              className="top-search"
+              aria-label="Find a moment"
+            >
+              <Icon name="search" size={16} />
+              <span>Find a moment</span>
+            </Link>
+            <span className="archive-badge">
+              <span className="status-dot" />
+              Family space
+            </span>
+          </div>
+        </header>
+        <main id="main-content" className="main-content">
+          <div key={pathname} className="page-transition">
+            {children}
+          </div>
+        </main>
+        <footer className="workspace-footer">
+          <span>Made for the moments that matter.</span>
+          <span>FAMVAULT ✳</span>
+        </footer>
+      </div>
+      <MobileNav onMenu={() => setMenuOpen(true)} />
+      <Dialog
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        title="Explore your archive"
+        className="navigation-dialog"
       >
-        {children}
-      </main>
-
-      {/* Mobile Bottom Nav */}
-      <MobileNav />
-
-      <style>{`
-        @media (max-width: 768px) {
-          .main-content {
-            margin-left: 0 !important;
-          }
-        }
-      `}</style>
+        <Sidebar onNavigate={() => setMenuOpen(false)} />
+      </Dialog>
     </div>
   );
 }
