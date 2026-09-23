@@ -1,406 +1,245 @@
 "use client";
-
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { motion } from "framer-motion";
 import Link from "next/link";
+import Icon from "@/components/Icon";
+import ArchiveArt from "@/components/ArchiveArt";
+import { PageHeader, EmptyState, QueryError } from "@/components/Design";
+import { PhotoTile } from "@/components/PhotoGrid";
 import PhotoViewer from "@/components/PhotoViewer";
 import type { PhotoItem } from "@/types";
-
-interface AnniversaryMemory {
+interface Anniversary {
   year: number;
-  yearsAgo: number;
   title: string;
   subtitle: string;
-  coverUrl: string | null;
   photos: PhotoItem[];
 }
-
 export default function HomePage() {
   const { data: session } = useSession();
   const queryClient = useQueryClient();
-  const userName = session?.user?.name?.split(" ")[0] || "there";
-
-  // Time-based greeting
-  const hour = new Date().getHours();
-  const greeting =
-    hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-
-  // Photo viewer state
-  const [viewerPhotos, setViewerPhotos] = useState<PhotoItem[]>([]);
-  const [viewerIndex, setViewerIndex] = useState(0);
-  const [viewerOpen, setViewerOpen] = useState(false);
-
-  // Fetch On This Day memories
-  const { data: onThisDayData, isLoading: loadingOnThisDay } = useQuery<{
-    hasMemories: boolean;
-    anniversaries: AnniversaryMemory[];
+  const [viewer, setViewer] = useState<{
+    photos: PhotoItem[];
+    index: number;
+  } | null>(null);
+  const photosQuery = useQuery<{
+    items: PhotoItem[];
+  }>({
+    queryKey: ["photos", "home"],
+    queryFn: async () => {
+      const res = await fetch("/api/photos?limit=8");
+      if (!res.ok) throw Error("Could not load photos");
+      return res.json();
+    },
+    refetchInterval: (query) =>
+      query.state.data?.items.some(
+        (p) =>
+          p.processingStatus !== "READY" && p.processingStatus !== "FAILED",
+      )
+        ? 4000
+        : false,
+  });
+  const memoriesQuery = useQuery<{
+    anniversaries: Anniversary[];
   }>({
     queryKey: ["on-this-day"],
     queryFn: async () => {
       const res = await fetch("/api/memories/on-this-day");
-      if (!res.ok) return { hasMemories: false, anniversaries: [] };
+      if (!res.ok) throw Error("Could not load memories");
       return res.json();
     },
   });
-
-  // Fetch recently added photos
-  const { data: recentPhotosData } = useQuery<{ items: PhotoItem[] }>({
-    queryKey: ["photos", "recent"],
-    queryFn: async () => {
-      const res = await fetch("/api/photos?limit=8");
-      if (!res.ok) return { items: [] };
+  const favorite = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/photos/${id}/favorite`, { method: "POST" });
+      if (!res.ok) throw Error("Could not update favorite");
       return res.json();
     },
-  });
-
-  const recentPhotos = recentPhotosData?.items || [];
-  const anniversaries = onThisDayData?.anniversaries || [];
-
-  const favoriteMutation = useMutation({
-    mutationFn: async (photoId: string) => {
-      const res = await fetch(`/api/photos/${photoId}/favorite`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to toggle favorite");
-      return res.json();
-    },
-    onSuccess: () => {
+    onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: ["photos"] });
       queryClient.invalidateQueries({ queryKey: ["on-this-day"] });
+      setViewer((current) =>
+        current
+          ? {
+              ...current,
+              photos: current.photos.map((p) =>
+                p.id === id ? { ...p, isFavorite: !p.isFavorite } : p,
+              ),
+            }
+          : null,
+      );
     },
   });
-
-  const openViewerForPhotos = useCallback((photos: PhotoItem[], index: number = 0) => {
-    setViewerPhotos(photos);
-    setViewerIndex(index);
-    setViewerOpen(true);
-  }, []);
-
+  const photos = photosQuery.data?.items || [];
+  const anniversary = memoriesQuery.data?.anniversaries?.[0];
+  const today = new Date();
   return (
-    <div style={{ padding: "32px 28px 60px", maxWidth: "1280px", margin: "0 auto" }}>
-      {/* Hero Greeting */}
-      <motion.div
-        initial={{ opacity: 0, y: 15 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        style={{ marginBottom: "36px" }}
-      >
-        <h1
-          style={{
-            fontSize: "32px",
-            fontWeight: 800,
-            color: "var(--color-stone-800)",
-            margin: "0 0 6px",
-            letterSpacing: "-0.5px",
-          }}
-        >
-          {greeting}, {userName}
-        </h1>
-        <p
-          style={{
-            fontSize: "15px",
-            color: "var(--color-stone-400)",
-            margin: 0,
-          }}
-        >
-          &ldquo;Memories worth keeping.&rdquo;
-        </p>
-      </motion.div>
-
-      {/* On This Day / Today in Your Family */}
-      <motion.section
-        initial={{ opacity: 0, y: 15 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1, duration: 0.5 }}
-        style={{ marginBottom: "44px" }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: "16px",
-          }}
-        >
-          <h2
-            style={{
-              fontSize: "18px",
-              fontWeight: 700,
-              color: "var(--color-stone-700)",
-              margin: 0,
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <span>✨</span> Today in your family
+    <div className="page">
+      <PageHeader
+        eyebrow="A LITTLE CLOSER, EVERY DAY"
+        title={`Welcome back, ${session?.user?.name?.split(" ")[0] || "friend"}.`}
+        description="Your people. Your stories. All in one beautiful place."
+        action={
+          <Link href="/timeline?upload=true" className="btn-secondary">
+            <Icon name="plus" size={16} />
+            Add a moment
+          </Link>
+        }
+      />
+      <section className="hero">
+        <div className="hero-copy">
+          <span className="eyebrow">THE GOOD OLD DAYS ARE HAPPENING NOW</span>
+          <h2>
+            A home for
+            <br />
+            your <em>forever moments.</em>
           </h2>
+          <p>
+            Big adventures. Ordinary afternoons. Keep the pieces of your life
+            that make it yours.
+          </p>
+          <div className="hero-actions">
+            <Link href="/timeline?upload=true" className="btn-primary">
+              <Icon name="plus" size={16} />
+              Add your photos
+            </Link>
+            <Link href="/timeline" className="text-link">
+              Explore your archive
+              <Icon name="arrow" size={15} />
+            </Link>
+          </div>
+          <span className="hero-footnote">
+            <Icon name="people" size={13} />A shared collection for your family.
+          </span>
         </div>
-
-        {loadingOnThisDay ? (
-          <div
-            style={{
-              height: "220px",
-              borderRadius: "24px",
-              background: "var(--color-stone-100)",
-              animation: "pulse 1.5s ease-in-out infinite",
-            }}
-          />
-        ) : anniversaries.length > 0 ? (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-              gap: "18px",
-            }}
-          >
-            {anniversaries.map((anni) => (
-              <motion.div
-                key={anni.year}
-                whileHover={{ y: -4 }}
-                onClick={() => openViewerForPhotos(anni.photos, 0)}
-                style={{
-                  position: "relative",
-                  height: "240px",
-                  borderRadius: "24px",
-                  overflow: "hidden",
-                  cursor: "pointer",
-                  boxShadow: "0 8px 24px rgba(0,0,0,0.06)",
-                  background: "#1c1917",
-                }}
-              >
-                {anni.coverUrl && (
-                  <img
-                    src={anni.coverUrl}
-                    alt={anni.title}
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                      filter: "brightness(0.7)",
-                    }}
-                  />
-                )}
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    background:
-                      "linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.2) 60%, rgba(0,0,0,0.1) 100%)",
-                  }}
-                />
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "16px",
-                    left: "16px",
-                    padding: "4px 10px",
-                    borderRadius: "12px",
-                    background: "rgba(0,0,0,0.4)",
-                    backdropFilter: "blur(8px)",
-                    color: "#fbbf24",
-                    fontSize: "12px",
-                    fontWeight: 700,
-                  }}
-                >
-                  On This Day
-                </div>
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: "16px",
-                    left: "16px",
-                    right: "16px",
-                    color: "#fff",
-                  }}
-                >
-                  <div style={{ fontSize: "12px", color: "rgba(255,255,255,0.7)" }}>
-                    {anni.subtitle}
-                  </div>
-                  <h3
-                    style={{
-                      fontSize: "18px",
-                      fontWeight: 800,
-                      margin: "2px 0 6px",
-                      letterSpacing: "-0.3px",
-                    }}
-                  >
-                    {anni.title}
-                  </h3>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      fontSize: "12px",
-                    }}
-                  >
-                    <span>📸 {anni.photos.length} photos</span>
-                    <span style={{ fontWeight: 700, color: "#fbbf24" }}>Relive →</span>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        ) : (
-          <div
-            style={{
-              background: "var(--color-surface-glass)",
-              backdropFilter: "blur(20px) saturate(1.6)",
-              border: "1px solid rgba(255,255,255,0.4)",
-              borderRadius: "20px",
-              padding: "36px 20px",
-              textAlign: "center",
-              color: "var(--color-stone-400)",
-              fontSize: "15px",
-            }}
-          >
-            <span style={{ fontSize: "36px", display: "block", marginBottom: "10px" }}>
-              📸
+        <ArchiveArt photos={photos} />
+      </section>
+      <div className="quick-grid">
+        {(
+          [
+            {
+              href: "/albums",
+              icon: "album",
+              title: "Beautifully collected",
+              copy: "Make room for every chapter.",
+            },
+            {
+              href: "/people",
+              icon: "people",
+              title: "Your favorite people",
+              copy: "The faces behind your stories.",
+            },
+            {
+              href: "/memories",
+              icon: "sparkle",
+              title: "A little time travel",
+              copy: "Rediscover a forgotten moment.",
+            },
+          ] as const
+        ).map((item) => (
+          <Link href={item.href} className="quick-card" key={item.href}>
+            <span className="quick-icon">
+              <Icon name={item.icon} size={21} />
             </span>
-            <div style={{ fontWeight: 600, color: "var(--color-stone-700)", marginBottom: "4px" }}>
-              No past memories on this date yet
+            <div>
+              <strong>{item.title}</strong>
+              <small>{item.copy}</small>
             </div>
-            <span style={{ fontSize: "13px" }}>
-              Photos uploaded with past dates will automatically surface here as anniversary moments.
-            </span>
+            <Icon name="arrow" size={15} />
+          </Link>
+        ))}
+      </div>
+      <section>
+        <div className="section-heading">
+          <div>
+            <h2>
+              From your collection<span className="section-count">PHOTOS</span>
+            </h2>
+            <p>Little windows into a life well lived.</p>
           </div>
-        )}
-      </motion.section>
-
-      {/* Recently Added Photos */}
-      <motion.section
-        initial={{ opacity: 0, y: 15 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2, duration: 0.5 }}
-        style={{ marginBottom: "44px" }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: "16px",
-          }}
-        >
-          <h2
-            style={{
-              fontSize: "18px",
-              fontWeight: 700,
-              color: "var(--color-stone-700)",
-              margin: 0,
-            }}
-          >
-            Recently Added
-          </h2>
-          <Link
-            href="/timeline"
-            style={{
-              fontSize: "13px",
-              fontWeight: 600,
-              color: "var(--color-primary-600)",
-              textDecoration: "none",
-            }}
-          >
-            View all →
+          <Link href="/timeline" className="text-link">
+            View all photos
+            <Icon name="arrow" size={15} />
           </Link>
         </div>
-
-        {recentPhotos.length > 0 ? (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))",
-              gap: "10px",
-            }}
-          >
-            {recentPhotos.map((photo, i) => (
-              <motion.div
+        {photosQuery.isError ? (
+          <QueryError retry={() => photosQuery.refetch()} />
+        ) : photosQuery.isLoading ? (
+          <div className="recent-grid">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="skeleton" style={{ aspectRatio: "1" }} />
+            ))}
+          </div>
+        ) : photos.length ? (
+          <div className="recent-grid">
+            {photos.slice(0, 4).map((photo, index) => (
+              <PhotoTile
                 key={photo.id}
-                whileHover={{ scale: 1.03 }}
-                onClick={() => openViewerForPhotos(recentPhotos, i)}
-                style={{
-                  aspectRatio: "1",
-                  borderRadius: "14px",
-                  overflow: "hidden",
-                  cursor: "pointer",
-                  background: "var(--color-stone-100)",
-                }}
-              >
-                <img
-                  src={photo.thumbUrl}
-                  alt={photo.filename}
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              </motion.div>
+                photo={photo}
+                onClick={() => setViewer({ photos, index })}
+              />
             ))}
           </div>
         ) : (
-          <div
-            style={{
-              padding: "24px",
-              borderRadius: "16px",
-              background: "var(--color-surface-elevated)",
-              textAlign: "center",
-              color: "var(--color-stone-400)",
-              fontSize: "14px",
-            }}
-          >
-            No photos uploaded yet. Upload your first photo to begin!
-          </div>
+          <EmptyState
+            title="Every archive starts with a moment."
+            description="Bring a few favorite photos. We’ll give them a lovely place to live."
+            href="/timeline?upload=true"
+            label="Upload your first photos"
+          />
         )}
-      </motion.section>
-
-      {/* Memories from the Past (Quick Year Nav) */}
-      <motion.section
-        initial={{ opacity: 0, y: 15 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3, duration: 0.5 }}
-        style={{ marginBottom: "44px" }}
-      >
-        <h2
-          style={{
-            fontSize: "18px",
-            fontWeight: 700,
-            color: "var(--color-stone-700)",
-            margin: "0 0 16px",
-          }}
-        >
-          Memories by Year
-        </h2>
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-          {[2026, 2025, 2024, 2023, 2022, 2021].map((year) => (
-            <Link
-              key={year}
-              href={`/search?year=${year}`}
-              style={{
-                padding: "10px 20px",
-                borderRadius: "14px",
-                background: "var(--color-surface-elevated)",
-                border: "1px solid var(--color-stone-200)",
-                fontSize: "14px",
-                fontWeight: 700,
-                color: "var(--color-stone-700)",
-                textDecoration: "none",
-                transition: "all 0.2s ease",
-              }}
-            >
-              {year}
-            </Link>
-          ))}
+      </section>
+      <section className="memory-banner">
+        <div className="date-stamp">
+          <span>
+            {today.toLocaleDateString("en", { month: "short" }).toUpperCase()}
+          </span>
+          <strong>{today.getDate()}</strong>
         </div>
-      </motion.section>
-
-      {/* Lightbox PhotoViewer */}
+        <div>
+          <span className="eyebrow">ON THIS DAY</span>
+          <h2>
+            {anniversary
+              ? anniversary.title
+              : "Some days deserve a second look."}
+          </h2>
+          <p>
+            {anniversary
+              ? anniversary.subtitle
+              : memoriesQuery.isError
+                ? "Your memories couldn’t load right now."
+                : "Photos from this date in past years will find their way back to you."}
+          </p>
+        </div>
+        {anniversary ? (
+          <button
+            className="btn-secondary"
+            onClick={() => setViewer({ photos: anniversary.photos, index: 0 })}
+          >
+            Relive this day
+            <Icon name="arrow" size={15} />
+          </button>
+        ) : (
+          <Link href="/memories" className="text-link">
+            Explore memories
+            <Icon name="arrow" size={15} />
+          </Link>
+        )}
+      </section>
+      {favorite.isError && (
+        <div className="form-alert" role="alert">
+          Couldn’t save your favorite. Please try again.
+        </div>
+      )}
       <PhotoViewer
-        photos={viewerPhotos}
-        currentIndex={viewerIndex}
-        isOpen={viewerOpen}
-        onClose={() => setViewerOpen(false)}
-        onNavigate={(newIndex) => setViewerIndex(newIndex)}
-        onToggleFavorite={(photoId) => favoriteMutation.mutate(photoId)}
+        photos={viewer?.photos || []}
+        currentIndex={viewer?.index || 0}
+        isOpen={!!viewer}
+        onClose={() => setViewer(null)}
+        onNavigate={(index) =>
+          setViewer((current) => (current ? { ...current, index } : null))
+        }
+        onToggleFavorite={(id) => favorite.mutate(id)}
       />
     </div>
   );

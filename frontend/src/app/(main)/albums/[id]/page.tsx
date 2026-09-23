@@ -1,11 +1,11 @@
-import { prisma } from "@/lib/db";
 import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { PageHeader } from "@/components/Design";
 import CollectionDetail from "@/components/CollectionDetail";
 import { toPhotoItem } from "@/lib/photo-item";
-export default async function PersonPage({
+export default async function AlbumPage({
   params,
 }: {
   params: Promise<{
@@ -20,11 +20,12 @@ export default async function PersonPage({
   });
   if (!user) notFound();
   const { id } = await params;
-  const person = await prisma.person.findFirst({
+  const album = await prisma.album.findFirst({
     where: { id, familyId: user.familyId },
     include: {
-      faces: {
+      media: {
         where: { media: { uploader: { familyId: user.familyId } } },
+        orderBy: { order: "asc" },
         include: {
           media: {
             include: {
@@ -39,23 +40,22 @@ export default async function PersonPage({
       },
     },
   });
-  if (!person) notFound();
-  const photos = Array.from(
-    new Map(
-      person.faces.map((face) => [face.media.id, toPhotoItem(face.media)]),
-    ).values(),
-  );
+  if (!album) notFound();
   return (
     <div className="page">
-      <Link href="/people" className="text-link" style={{ marginBottom: 24 }}>
-        ← All your people
+      <Link href="/albums" className="text-link" style={{ marginBottom: 24 }}>
+        ← All albums
       </Link>
       <PageHeader
-        eyebrow="A FAMILIAR FACE, A THOUSAND STORIES"
-        title={person.name || "Someone special."}
-        description={`${photos.length} moments from your shared story.`}
+        eyebrow="A CHAPTER OF YOUR OWN"
+        title={album.title}
+        description={
+          album.description || `${album.media.length} collected moments.`
+        }
       />
-      <CollectionDetail photos={photos} />
+      <CollectionDetail
+        photos={album.media.map((item) => toPhotoItem(item.media))}
+      />
     </div>
   );
 }

@@ -8,8 +8,7 @@ import {
   getPublicUrl,
 } from "@/lib/storage";
 import { logAudit } from "@/lib/audit";
-import { mediaQueue } from "@/lib/queue";
-
+import { getMediaQueue } from "@/lib/queue";
 /**
  * GET /api/photos — List photos for the user's family, grouped by date.
  * Scoped to the authenticated user's family.
@@ -17,11 +16,51 @@ import { mediaQueue } from "@/lib/queue";
 export const GET = withFamilyAuth(async (req, ctx) => {
   const { searchParams } = new URL(req.url);
   const cursor = searchParams.get("cursor");
-  const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100);
-
+  const requestedLimit = Number(searchParams.get("limit") || 50);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(Math.floor(requestedLimit), 100))
+    : 50;
+  const q = searchParams.get("q")?.trim();
+  const year = Number(searchParams.get("year"));
+  const validYear = Number.isInteger(year) && year >= 1800 && year <= 9998;
   // All queries scoped to family via uploader's familyId
   const photos = await prisma.media.findMany({
     where: {
+      ...(searchParams.get("favorite") === "true"
+        ? { favorites: { some: { userId: ctx.userId } } }
+        : {}),
+      ...(q
+        ? {
+            OR: [
+              { filename: { contains: q } },
+              { placeName: { contains: q } },
+              { uploader: { name: { contains: q } } },
+            ],
+          }
+        : {}),
+      ...(validYear
+        ? {
+            AND: [
+              {
+                OR: [
+                  {
+                    takenAt: {
+                      gte: new Date(Date.UTC(year, 0, 1)),
+                      lt: new Date(Date.UTC(year + 1, 0, 1)),
+                    },
+                  },
+                  {
+                    takenAt: null,
+                    uploadedAt: {
+                      gte: new Date(Date.UTC(year, 0, 1)),
+                      lt: new Date(Date.UTC(year + 1, 0, 1)),
+                    },
+                  },
+                ],
+              },
+            ],
+          }
+        : {}),
       uploader: {
         familyId: ctx.familyId,
       },
@@ -29,6 +68,7 @@ export const GET = withFamilyAuth(async (req, ctx) => {
     orderBy: [
       { takenAt: { sort: "desc", nulls: "last" } },
       { uploadedAt: "desc" },
+      { id: "desc" },
     ],
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -40,10 +80,8 @@ export const GET = withFamilyAuth(async (req, ctx) => {
       },
     },
   });
-
   const hasMore = photos.length > limit;
   const items = photos.slice(0, limit);
-
   const photoItems = items.map((photo) => ({
     id: photo.id,
     filename: photo.filename,
@@ -62,13 +100,11 @@ export const GET = withFamilyAuth(async (req, ctx) => {
     processingStatus: photo.processingStatus,
     exifData: photo.exifData || null,
   }));
-
   return NextResponse.json({
     items: photoItems,
     nextCursor: hasMore ? items[items.length - 1].id : null,
   });
 });
-
 /**
  * POST /api/photos — Upload one or more photos.
  * Requires MEMBER role or higher.
@@ -77,31 +113,24 @@ export const POST = withFamilyAuth(
   async (req: NextRequest, ctx) => {
     try {
       await ensureUploadDirs();
-
       const formData = await req.formData();
       const files = formData.getAll("files") as File[];
-
       if (files.length === 0) {
         return NextResponse.json(
           { error: "No files provided" },
-          { status: 400 }
+          { status: 400 },
         );
       }
-
       const results = [];
-
       for (const file of files) {
         // Validate file type
         if (!file.type.startsWith("image/")) {
           continue; // Skip non-image files for now
         }
-
         const buffer = Buffer.from(await file.arrayBuffer());
         const key = generateStorageKey(file.name, "originals");
-
         // Save original version
         await saveFile(key, buffer, file.type);
-
         // Save to database as UPLOADED
         const photo = await prisma.media.create({
           data: {
@@ -117,7 +146,6 @@ export const POST = withFamilyAuth(
             processingStatus: "UPLOADED",
           },
         });
-
         // Create processing job
         await prisma.mediaProcessingJob.create({
           data: {
@@ -126,14 +154,12 @@ export const POST = withFamilyAuth(
             status: "PENDING",
           },
         });
-
         // Enqueue to BullMQ
-        await mediaQueue.add("process-media", {
+        await getMediaQueue().add("process-media", {
           mediaId: photo.id,
           key,
           filename: file.name,
         });
-
         results.push({
           id: photo.id,
           filename: photo.filename,
@@ -141,25 +167,23 @@ export const POST = withFamilyAuth(
           status: "UPLOADED",
         });
       }
-
       // Audit log
       await logAudit({
         familyId: ctx.familyId,
         userId: ctx.userId,
         action: "UPLOAD",
         resourceType: "MEDIA",
-        details: { count: results.length, filenames: results.map((r) => r.filename) },
+        details: {
+          count: results.length,
+          filenames: results.map((r) => r.filename),
+        },
         ipAddress: getClientIp(req),
       });
-
       return NextResponse.json({ uploaded: results }, { status: 201 });
     } catch (error) {
       console.error("Upload error:", error);
-      return NextResponse.json(
-        { error: "Upload failed" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Upload failed" }, { status: 500 });
     }
   },
-  { minRole: "MEMBER" }
+  { minRole: "MEMBER" },
 );
