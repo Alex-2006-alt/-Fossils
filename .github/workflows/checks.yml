@@ -2,7 +2,7 @@ name: Application checks
 on: [push, pull_request]
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     env:
       DATABASE_URL: file:/tmp/famvault-ci.db
       PRIVATE_UPLOAD_DIR: /tmp/famvault-ci-media
@@ -17,7 +17,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci --include=optional --os=linux --cpu=x64
+      - run: npm ci
       - run: npm run db:prepare
       - run: npm run typecheck
       - run: npm run lint
