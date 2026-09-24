@@ -17,7 +17,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci --include=optional
+      - run: npm ci --include=optional --os=linux --cpu=x64
       - run: npm run db:prepare
       - run: npm run typecheck
       - run: npm run lint
