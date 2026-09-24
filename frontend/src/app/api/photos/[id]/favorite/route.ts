@@ -1,44 +1,24 @@
-import { NextRequest, NextResponse } from "next/server";
-import { withFamilyAuth } from "@/lib/api-auth";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-
-/**
- * POST /api/photos/[id]/favorite — Toggle favorite status.
- */
-export const POST = withFamilyAuth(async (req: NextRequest, ctx, params) => {
-  const id = params?.id;
-  if (!id) {
-    return NextResponse.json({ error: "Missing photo ID" }, { status: 400 });
-  }
-
-  // Verify photo belongs to user's family
-  const photo = await prisma.media.findUnique({
-    where: { id },
-    include: { uploader: { select: { familyId: true } } },
+import { withFamilyAuth } from "@/lib/api-auth";
+import { HttpError } from "@famvault/runtime/security";
+export const POST = withFamilyAuth(async (_, ctx, params) => {
+  const photo = await prisma.media.findFirst({
+    where: { id: params?.id, familyId: ctx.familyId, deletedAt: null },
+    select: { id: true },
   });
-
-  if (!photo || photo.uploader.familyId !== ctx.familyId) {
-    return NextResponse.json({ error: "Photo not found" }, { status: 404 });
-  }
-
-  // Toggle favorite
-  const existing = await prisma.favorite.findUnique({
-    where: {
-      userId_mediaId: { userId: ctx.userId, mediaId: id },
-    },
+  if (!photo) throw new HttpError(404, "Photo not found");
+  const isFavorite = await prisma.$transaction(async (tx) => {
+    const key = { userId: ctx.userId, mediaId: photo.id };
+    const existing = await tx.favorite.findUnique({
+      where: { userId_mediaId: key },
+    });
+    if (existing) {
+      await tx.favorite.delete({ where: { userId_mediaId: key } });
+      return false;
+    }
+    await tx.favorite.create({ data: key });
+    return true;
   });
-
-  if (existing) {
-    await prisma.favorite.delete({
-      where: {
-        userId_mediaId: { userId: ctx.userId, mediaId: id },
-      },
-    });
-    return NextResponse.json({ favorited: false });
-  } else {
-    await prisma.favorite.create({
-      data: { userId: ctx.userId, mediaId: id },
-    });
-    return NextResponse.json({ favorited: true });
-  }
+  return NextResponse.json({ isFavorite });
 });

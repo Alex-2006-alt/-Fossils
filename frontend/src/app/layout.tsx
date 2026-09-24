@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import type { Metadata } from "next";
 import "./globals.css";
 import Providers from "@/components/Providers";
@@ -9,11 +10,12 @@ export const metadata: Metadata = {
   keywords: ["family photos", "photo sharing", "memories", "private gallery"],
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  await headers();
   return (
     <html lang="en" suppressHydrationWarning>
       <head>

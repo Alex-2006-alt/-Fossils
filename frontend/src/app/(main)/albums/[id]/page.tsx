@@ -1,3 +1,4 @@
+import CollectionControls from "@/components/CollectionControls";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { notFound, redirect } from "next/navigation";
@@ -24,7 +25,7 @@ export default async function AlbumPage({
     where: { id, familyId: user.familyId },
     include: {
       media: {
-        where: { media: { uploader: { familyId: user.familyId } } },
+        where: { media: { familyId: user.familyId, deletedAt: null } },
         orderBy: { order: "asc" },
         include: {
           media: {
@@ -52,6 +53,15 @@ export default async function AlbumPage({
         description={
           album.description || `${album.media.length} collected moments.`
         }
+      />
+      <CollectionControls
+        kind="albums"
+        id={album.id}
+        title={album.title}
+        photos={album.media.map((m) => ({
+          id: m.media.id,
+          filename: m.media.filename,
+        }))}
       />
       <CollectionDetail
         photos={album.media.map((item) => toPhotoItem(item.media))}

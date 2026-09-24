@@ -1,45 +1,29 @@
-import { PrismaClient } from "@prisma/client";
+// Development-only bootstrap. Never embed real credentials in client code or seeds.
+import { prisma } from "./src/lib/db";
 import bcrypt from "bcryptjs";
-
-const prisma = new PrismaClient();
+import {
+  emailSchema,
+  passwordSchema,
+  nameSchema,
+  newToken,
+} from "@famvault/runtime/security";
+if (process.env.NODE_ENV === "production")
+  throw new Error("Development seed is disabled in production");
 
 async function main() {
-  const email = "samiranbera2006@gmail.com";
-  const passwordStr = "sbking420";
-  const hashedPassword = await bcrypt.hash(passwordStr, 10);
-
-  let family = await prisma.family.findFirst();
-  if (!family) {
-    family = await prisma.family.create({
-      data: {
-        name: "Default Family",
-        inviteCode: "DEFAULT_INVITE",
-      },
-    });
-  }
-
-  const user = await prisma.user.upsert({
-    where: { email },
-    update: {
-      password: hashedPassword,
-    },
-    create: {
+  const email = emailSchema.parse(process.env.SEED_EMAIL);
+  const password = passwordSchema.parse(process.env.SEED_PASSWORD);
+  const name = nameSchema.parse(process.env.SEED_NAME);
+  const hash = await bcrypt.hash(password, 12);
+  await prisma.user.create({
+    data: {
       email,
-      password: hashedPassword,
-      name: "Samiran Bera",
+      name,
+      password: hash,
       role: "OWNER",
-      familyId: family.id,
+      family: { create: { name: "Development family", inviteCode: newToken() } },
     },
   });
-
-  console.log("User created or updated:", user.email);
+  await prisma.$disconnect();
 }
-
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+main().catch(console.error);

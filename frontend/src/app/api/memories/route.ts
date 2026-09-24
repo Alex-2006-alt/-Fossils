@@ -12,12 +12,20 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
     const memories = await prisma.memory.findMany({
       where: {
         familyId: ctx.familyId,
+        status: { not: "ARCHIVED" },
       },
       orderBy: {
         dateFrom: "desc",
       },
       include: {
         media: {
+          where: {
+            media: {
+              familyId: ctx.familyId,
+              deletedAt: null,
+              processingStatus: "READY",
+            },
+          },
           take: 4,
           orderBy: { order: "asc" },
           include: {
@@ -40,7 +48,10 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
       include: {
         faces: {
           take: 1,
-          where: { cropKey: { not: null } },
+          where: {
+            cropKey: { not: null },
+            media: { familyId: ctx.familyId, deletedAt: null },
+          },
         },
       },
     });
@@ -50,9 +61,11 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
         {
           id: p.id,
           name: p.name || "Unknown",
-          coverUrl: p.faces[0]?.cropKey ? getPublicUrl(p.faces[0].cropKey) : null,
+          coverUrl: p.faces[0]?.cropKey
+            ? getPublicUrl(p.faces[0].cropKey)
+            : null,
         },
-      ])
+      ]),
     );
 
     const items = memories.map((mem) => {
@@ -61,14 +74,17 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
       const coverUrl = firstMedia?.mediumKey
         ? getPublicUrl(firstMedia.mediumKey)
         : firstMedia?.thumbKey
-        ? getPublicUrl(firstMedia.thumbKey)
-        : null;
+          ? getPublicUrl(firstMedia.thumbKey)
+          : null;
 
       // Extract people
-      let peopleList: { id: string; name: string; coverUrl: string | null }[] = [];
+      let peopleList: { id: string; name: string; coverUrl: string | null }[] =
+        [];
       try {
         const ids: string[] = JSON.parse(mem.peopleIds || "[]");
-        peopleList = ids.map((id) => peopleMap.get(id)).filter(Boolean) as any[];
+        peopleList = ids
+          .map((id) => peopleMap.get(id))
+          .filter(Boolean) as typeof peopleList;
       } catch {}
 
       return {
@@ -88,11 +104,11 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
     });
 
     return NextResponse.json({ items });
-  } catch (error: any) {
+  } catch (error) {
     console.error("GET /api/memories error:", error);
     return NextResponse.json(
-      { error: "Failed to fetch memories", details: error.message },
-      { status: 500 }
+      { error: "Failed to fetch memories" },
+      { status: 500 },
     );
   }
 });

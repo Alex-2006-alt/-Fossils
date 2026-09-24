@@ -4,8 +4,24 @@
   "private": true,
   "workspaces": [
     "frontend",
-    "ai-service",
     "workers",
     "packages/*"
-  ]
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build --workspace=frontend",
+    "worker": "npm run start --workspace=workers",
+    "test": "npm run test --workspace=frontend",
+    "typecheck": "npm run typecheck --workspace=frontend && npm run typecheck --workspace=workers",
+    "lint": "npm run lint --workspace=frontend",
+    "db:prepare": "node scripts/prepare-db.mjs",
+    "db:backup": "node scripts/backup.mjs",
+    "db:generate": "node frontend/node_modules/prisma/build/index.js generate --schema frontend/prisma/schema.prisma",
+    "postinstall": "npm run db:generate",
+    "test:integration": "node scripts/test-integration.mjs",
+    "dev:web": "npm run dev --workspace=frontend"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
 }

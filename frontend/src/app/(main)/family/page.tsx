@@ -1,4 +1,7 @@
 "use client";
+import Trash from "@/components/Trash";
+import FamilyTree from "@/components/FamilyTree";
+import FamilySettings from "@/components/FamilySettings";
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -191,16 +194,9 @@ export default function FamilyPage() {
           )}
         </section>
       )}
-      <div className="memory-banner">
-        <Icon name="tree" size={28} />
-        <div>
-          <h2>Every generation, connected.</h2>
-          <p>
-            A family tree is coming in a future chapter. Your shared photo
-            archive is ready today.
-          </p>
-        </div>
-      </div>
+      <FamilyTree />
+      <FamilySettings />
+      <Trash />
     </div>
   );
 }

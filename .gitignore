@@ -38,3 +38,10 @@ next-env.d.ts
 Thumbs.db
 .vscode/
 .idea/
+
+# Private media, backups and isolated integration fixtures
+.data/
+backups/
+.test-data/
+frontend/public/uploads/
+packages/runtime/generated/

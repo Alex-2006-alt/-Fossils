@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import PhotoActions from "./PhotoActions";
 import Dialog from "./Dialog";
 import Icon from "./Icon";
 import type { PhotoItem } from "@/types";
@@ -9,7 +10,7 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   onNavigate: (index: number) => void;
-  onToggleFavorite: (id: string) => void;
+  onToggleFavorite?: (id: string) => void;
 }
 export default function PhotoViewer({
   photos,
@@ -69,7 +70,8 @@ export default function PhotoViewer({
         <div className="viewer-actions">
           <button
             className="icon-button"
-            onClick={() => onToggleFavorite(photo.id)}
+            disabled={!onToggleFavorite}
+            onClick={() => onToggleFavorite?.(photo.id)}
             aria-label={
               photo.isFavorite ? "Remove from favorites" : "Add to favorites"
             }
@@ -139,6 +141,9 @@ export default function PhotoViewer({
           {photo.uploaderName ? ` · Added by ${photo.uploaderName}` : ""}
         </p>
       </footer>
+      {info && (
+        <PhotoActions key={photo.id} photo={photo} onDeleted={onClose} />
+      )}
       {info && (
         <dl className="viewer-info">
           <div>

@@ -7,8 +7,8 @@ import AuthLayout from "@/components/AuthLayout";
 import Icon from "@/components/Icon";
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("samiranbera2006@gmail.com");
-  const [password, setPassword] = useState("sbking420");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   async function submit(event: React.FormEvent) {
@@ -77,6 +77,9 @@ export default function LoginPage() {
           <Icon name="arrow" size={18} />
         </button>
       </form>
+      <Link href="/account-recovery" className="text-link">
+        Forgot your password?
+      </Link>
       <p className="auth-switch">
         New memories start here. <Link href="/signup">Create an account</Link>
       </p>

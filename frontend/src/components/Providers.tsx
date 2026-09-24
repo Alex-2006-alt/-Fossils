@@ -1,8 +1,9 @@
 "use client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { SessionProvider } from "next-auth/react";
+import { SessionProvider, useSession } from "next-auth/react";
 import {
   useState,
+  useRef,
   createContext,
   useContext,
   useEffect,
@@ -55,6 +56,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider>
       <QueryClientProvider client={queryClient}>
+        <SessionCache queryClient={queryClient} />
         <ThemeContext.Provider value={{ theme, toggleTheme }}>
           <MotionConfig reducedMotion="user">{children}</MotionConfig>
         </ThemeContext.Provider>
@@ -87,4 +89,20 @@ function subscribeTheme(listener: () => void) {
     window.removeEventListener("famvault-theme-change", listener);
     preference.removeEventListener("change", listener);
   };
+}
+
+function SessionCache({ queryClient }: { queryClient: QueryClient }) {
+  const { data, status } = useSession();
+  const previous = useRef<string | undefined>(undefined);
+  const identity =
+    status === "loading"
+      ? undefined
+      : (data?.user?.id || "anonymous") + ":" + (data?.user?.role || "");
+  useEffect(() => {
+    if (identity === undefined) return;
+    if (previous.current !== undefined && previous.current !== identity)
+      queryClient.clear();
+    previous.current = identity;
+  }, [identity, queryClient]);
+  return null;
 }

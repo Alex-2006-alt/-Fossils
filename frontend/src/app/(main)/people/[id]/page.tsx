@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import CollectionControls from "@/components/CollectionControls";
 import { auth } from "@/lib/auth";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
@@ -24,7 +25,7 @@ export default async function PersonPage({
     where: { id, familyId: user.familyId },
     include: {
       faces: {
-        where: { media: { uploader: { familyId: user.familyId } } },
+        where: { media: { familyId: user.familyId, deletedAt: null } },
         include: {
           media: {
             include: {
@@ -54,6 +55,11 @@ export default async function PersonPage({
         eyebrow="A FAMILIAR FACE, A THOUSAND STORIES"
         title={person.name || "Someone special."}
         description={`${photos.length} moments from your shared story.`}
+      />
+      <CollectionControls
+        kind="people"
+        id={person.id}
+        title={person.name || "Unknown"}
       />
       <CollectionDetail photos={photos} />
     </div>

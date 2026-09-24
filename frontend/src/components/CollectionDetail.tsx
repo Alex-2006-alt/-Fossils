@@ -1,4 +1,5 @@
 "use client";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import PhotoGrid from "./PhotoGrid";
@@ -10,7 +11,8 @@ export default function CollectionDetail({
 }: {
   photos: PhotoItem[];
 }) {
-  const [photos, setPhotos] = useState(initialPhotos);
+  const photos = initialPhotos;
+  const router = useRouter();
   const [index, setIndex] = useState<number | null>(null);
   const client = useQueryClient();
   const favorite = useMutation({
@@ -18,13 +20,9 @@ export default function CollectionDetail({
       const res = await fetch(`/api/photos/${id}/favorite`, { method: "POST" });
       if (!res.ok) throw Error("Could not save favorite");
     },
-    onSuccess: (_, id) => {
-      setPhotos((current) =>
-        current.map((p) =>
-          p.id === id ? { ...p, isFavorite: !p.isFavorite } : p,
-        ),
-      );
-      client.invalidateQueries({ queryKey: ["photos"] });
+    onSuccess: () => {
+      client.invalidateQueries();
+      router.refresh();
     },
   });
   return (

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { withFamilyAuth } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
 import { getPublicUrl } from "@/lib/storage";
@@ -13,7 +13,7 @@ export const GET = withFamilyAuth(async (req, ctx, params) => {
     if (!id) {
       return NextResponse.json(
         { error: "Memory ID is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -24,6 +24,13 @@ export const GET = withFamilyAuth(async (req, ctx, params) => {
       },
       include: {
         media: {
+          where: {
+            media: {
+              familyId: ctx.familyId,
+              deletedAt: null,
+              processingStatus: "READY",
+            },
+          },
           orderBy: { order: "asc" },
           include: {
             media: {
@@ -46,15 +53,12 @@ export const GET = withFamilyAuth(async (req, ctx, params) => {
     });
 
     if (!memory) {
-      return NextResponse.json(
-        { error: "Memory not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Memory not found" }, { status: 404 });
     }
 
     // Extract photos
     const photos = memory.media.map(({ media }) => {
-      let parsedExif: any = {};
+      let parsedExif: Record<string, unknown> = {};
       try {
         if (media.exifData) parsedExif = JSON.parse(media.exifData);
       } catch {}
@@ -87,7 +91,8 @@ export const GET = withFamilyAuth(async (req, ctx, params) => {
     });
 
     // Lookup participating people
-    let peopleList: { id: string; name: string; coverUrl: string | null }[] = [];
+    let peopleList: { id: string; name: string; coverUrl: string | null }[] =
+      [];
     try {
       const ids: string[] = JSON.parse(memory.peopleIds || "[]");
       if (ids.length > 0) {
@@ -96,14 +101,19 @@ export const GET = withFamilyAuth(async (req, ctx, params) => {
           include: {
             faces: {
               take: 1,
-              where: { cropKey: { not: null } },
+              where: {
+                cropKey: { not: null },
+                media: { familyId: ctx.familyId, deletedAt: null },
+              },
             },
           },
         });
         peopleList = people.map((p) => ({
           id: p.id,
           name: p.name || "Unknown",
-          coverUrl: p.faces[0]?.cropKey ? getPublicUrl(p.faces[0].cropKey) : null,
+          coverUrl: p.faces[0]?.cropKey
+            ? getPublicUrl(p.faces[0].cropKey)
+            : null,
         }));
       }
     } catch {}
@@ -112,8 +122,8 @@ export const GET = withFamilyAuth(async (req, ctx, params) => {
     const coverUrl = firstMedia?.mediumKey
       ? getPublicUrl(firstMedia.mediumKey)
       : firstMedia?.thumbKey
-      ? getPublicUrl(firstMedia.thumbKey)
-      : null;
+        ? getPublicUrl(firstMedia.thumbKey)
+        : null;
 
     return NextResponse.json({
       memory: {
@@ -130,11 +140,32 @@ export const GET = withFamilyAuth(async (req, ctx, params) => {
       },
       photos,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("GET /api/memories/[id] error:", error);
     return NextResponse.json(
-      { error: "Failed to fetch memory", details: error.message },
-      { status: 500 }
+      { error: "Failed to fetch memory" },
+      { status: 500 },
     );
   }
 });
+
+import { z } from "zod";
+import { jsonBody, nameSchema, HttpError } from "@famvault/runtime/security";
+export const PATCH = withFamilyAuth(
+  async (req, ctx, params) => {
+    const data = z
+      .object({
+        title: nameSchema.optional(),
+        story: z.string().max(10000).nullable().optional(),
+        status: z.enum(["PUBLISHED", "ARCHIVED"]).optional(),
+      })
+      .parse(await jsonBody(req));
+    const result = await prisma.memory.updateMany({
+      where: { id: params?.id, familyId: ctx.familyId },
+      data,
+    });
+    if (!result.count) throw new HttpError(404, "Memory not found");
+    return NextResponse.json({ success: true });
+  },
+  { minRole: "MEMBER" },
+);

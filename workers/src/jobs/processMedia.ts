@@ -1,173 +1,220 @@
-import { getFileBuffer, saveFile, generateStorageKey } from '../../../frontend/src/lib/storage';
-import { processImage } from '../../../frontend/src/lib/image-processing';
-import prisma from '../lib/db';
-import { faceapi, loadFaceModels } from '../lib/face-api';
-import * as tf from '@tensorflow/tfjs';
-import sharp from 'sharp';
-export async function processMediaJob(data: { mediaId: string; key: string; filename: string }) {
-  const { mediaId, key, filename } = data;
-
-  // 1. Update status to PROCESSING
-  await prisma.mediaProcessingJob.updateMany({
-    where: { mediaId, step: 'THUMBNAIL' },
-    data: { status: 'PROCESSING', startedAt: new Date() }
-  });
-
-  try {
-    // 2. Fetch original file buffer
-    const buffer = await getFileBuffer(key);
-    if (!buffer) {
-      throw new Error(`Could not read file buffer for key: ${key}`);
-    }
-
-    // 3. Process image (thumbnails + EXIF)
+import { prisma } from "@famvault/runtime/db";
+import { getFileBuffer, saveFile } from "@famvault/runtime/storage";
+import { processImage } from "@famvault/runtime/image-processing";
+import * as tf from "@tensorflow/tfjs";
+import sharp from "sharp";
+export async function processMediaJob(job: {
+  id: string;
+  mediaId: string;
+  step: string;
+  leaseId: string;
+}) {
+  const media = await prisma.media.findUnique({ where: { id: job.mediaId } });
+  if (!media || media.deletedAt) return;
+  const buffer = await getFileBuffer(media.originalKey);
+  if (!buffer) throw Error("Original file is missing");
+  if (job.step === "THUMBNAIL") {
     const processed = await processImage(buffer);
-
-    // 4. Save thumbnails
-    const thumbKey = key.replace('originals/', 'thumbs/');
-    const mediumKey = key.replace('originals/', 'medium/');
-
-    await saveFile(thumbKey, processed.thumb, 'image/jpeg');
-    await saveFile(mediumKey, processed.medium, 'image/jpeg');
-
-    // 5. Update Database Media
-    await prisma.media.update({
-      where: { id: mediaId },
-      data: {
-        thumbKey,
-        mediumKey,
-        width: processed.metadata.width,
-        height: processed.metadata.height,
-        takenAt: processed.metadata.takenAt,
-        latitude: processed.metadata.latitude,
-        longitude: processed.metadata.longitude,
-        exifData: processed.metadata.exifData ? JSON.stringify(processed.metadata.exifData) : undefined,
-        processingStatus: 'READY'
-      }
+    const thumbKey = `thumbs/${media.id}.jpg`,
+      mediumKey = `medium/${media.id}.jpg`;
+    await saveFile(thumbKey, processed.thumb, "image/jpeg");
+    await saveFile(mediumKey, processed.medium, "image/jpeg");
+    await prisma.$transaction(async (tx) => {
+      const live = await tx.media.findFirst({
+        where: { id: media.id, deletedAt: null },
+      });
+      const lease = await tx.mediaProcessingJob.findFirst({
+        where: { id: job.id, leaseId: job.leaseId, status: "PROCESSING" },
+      });
+      if (!live || !lease) return;
+      const family = await tx.family.findUniqueOrThrow({
+        where: { id: media.familyId },
+      });
+      await tx.media.update({
+        where: { id: media.id },
+        data: {
+          thumbKey,
+          mediumKey,
+          width: processed.metadata.width,
+          height: processed.metadata.height,
+          takenAt: processed.metadata.takenAt,
+          latitude: processed.metadata.latitude,
+          longitude: processed.metadata.longitude,
+          exifData: JSON.stringify(processed.metadata.exifData),
+          processingStatus: family.faceRecognitionEnabled ? "PROCESSING" : "READY",
+        },
+      });
+      if (
+        family.faceRecognitionEnabled &&
+        !(await tx.mediaProcessingJob.findFirst({
+          where: { mediaId: media.id, step: "FACE" },
+        }))
+      )
+        await tx.mediaProcessingJob.create({
+          data: { mediaId: media.id, step: "FACE" },
+        });
     });
-
-    // 6. Face Detection
-    try {
-      await loadFaceModels();
-      
-      const { data: rawData, info: rawInfo } = await sharp(buffer)
-        .removeAlpha()
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-        
-      const tensor = tf.tensor3d(new Uint8Array(rawData), [rawInfo.height, rawInfo.width, 3]);
-      const detections = await faceapi.detectAllFaces(tensor as any).withFaceLandmarks().withFaceDescriptors();
-      
-      if (detections.length > 0) {
-        // Fetch existing faces for clustering
-        const existingFaces = await prisma.face.findMany({
-          where: { descriptor: { not: null }, personId: { not: null } },
-          select: { id: true, personId: true, descriptor: true }
-        });
-
-        // Family ID is required to create a new person. We can get it via the media -> uploader -> familyId.
-        const mediaWithUser = await prisma.media.findUnique({
-          where: { id: mediaId },
-          include: { uploader: true }
-        });
-        const familyId = mediaWithUser?.uploader.familyId;
-
-        for (const [i, detection] of detections.entries()) {
-          const { box, score } = detection.detection;
-          const descriptor = detection.descriptor;
-
-          // Crop face image
-          const pad = 0.2; // 20% padding
-          const left = Math.max(0, Math.floor(box.x - box.width * pad));
-          const top = Math.max(0, Math.floor(box.y - box.height * pad));
-          const width = Math.min(processed.metadata.width! - left, Math.floor(box.width * (1 + pad * 2)));
-          const height = Math.min(processed.metadata.height! - top, Math.floor(box.height * (1 + pad * 2)));
-
-          const faceCropBuffer = await sharp(buffer)
-            .extract({ left, top, width, height })
-            .resize(200, 200, { fit: 'cover' })
-            .jpeg({ quality: 80 })
-            .toBuffer();
-
-          const faceCropKey = `faces/${mediaId}-face-${i}.jpg`;
-          await saveFile(faceCropKey, faceCropBuffer, 'image/jpeg');
-
-          // Naive in-memory clustering
-          let bestMatchPersonId: string | null = null;
-          let minDistance = 0.6; // 0.6 is typical threshold for Euclidean distance
-
-          for (const existing of existingFaces) {
-            if (!existing.descriptor) continue;
-            const existingDescriptor = new Float32Array(JSON.parse(existing.descriptor));
-            const distance = faceapi.euclideanDistance(descriptor, existingDescriptor);
-            
-            if (distance < minDistance) {
-              minDistance = distance;
-              bestMatchPersonId = existing.personId;
-            }
-          }
-
-          // If no match and we have familyId, create a new Person
-          if (!bestMatchPersonId && familyId) {
-            const newPerson = await prisma.person.create({
-              data: {
-                familyId,
-                name: null,
-                photoCount: 0
-              }
-            });
-            bestMatchPersonId = newPerson.id;
-          }
-
-          // Create Face record
-          const faceRecord = await prisma.face.create({
-            data: {
-              mediaId,
-              personId: bestMatchPersonId,
-              bbox: JSON.stringify({ x: box.x, y: box.y, w: box.width, h: box.height }),
-              cropKey: faceCropKey,
-              confidence: score,
-              descriptor: JSON.stringify(Array.from(descriptor))
-            }
-          });
-
-          // Update Person cover face and count
-          if (bestMatchPersonId) {
-            await prisma.person.update({
-              where: { id: bestMatchPersonId },
-              data: {
-                photoCount: { increment: 1 },
-                coverFaceId: faceRecord.id // always set latest as cover for now
-              }
-            });
-          }
-        }
-      }
-      
-      // Cleanup tensor memory
-      tf.dispose(tensor);
-      
-    } catch (faceError) {
-      console.error('Face detection failed:', faceError);
-      // We don't fail the whole job if only face detection fails, but log it.
+    return;
+  }
+  if (job.step !== "FACE") return;
+  if (
+    await prisma.face.findFirst({
+      where: { mediaId: media.id, isVerified: true },
+    })
+  )
+    return;
+  const family = await prisma.family.findUniqueOrThrow({
+    where: { id: media.familyId },
+  });
+  if (!family.faceRecognitionEnabled) return;
+  const { loadFaceModels, faceapi } = await import("../lib/face-api");
+  await loadFaceModels();
+  const { data, info } = await sharp(buffer, { limitInputPixels: 40_000_000 })
+    .rotate()
+    .resize({
+      width: 1600,
+      height: 1600,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .removeAlpha()
+    .toColourspace("srgb")
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const tensor = tf.tensor3d(new Uint8Array(data), [
+    info.height,
+    info.width,
+    3,
+  ]);
+  try {
+    const detections = await faceapi
+      .detectAllFaces(
+        tensor as unknown as Parameters<typeof faceapi.detectAllFaces>[0],
+      )
+      .withFaceLandmarks()
+      .withFaceDescriptors();
+    const prepared: {
+      cropKey: string;
+      confidence: number;
+      descriptor: number[];
+      bbox: { x: number; y: number; w: number; h: number };
+    }[] = [];
+    for (const [i, detection] of detections.entries()) {
+      const b = detection.detection.box;
+      const left = Math.max(0, Math.floor(b.x)),
+        top = Math.max(0, Math.floor(b.y));
+      const width = Math.min(info.width - left, Math.ceil(b.width)),
+        height = Math.min(info.height - top, Math.ceil(b.height));
+      if (width < 1 || height < 1) continue;
+      const cropKey = `faces/${media.id}-${i}.jpg`;
+      const crop = await sharp(data, {
+        raw: { width: info.width, height: info.height, channels: 3 },
+      })
+        .extract({ left, top, width, height })
+        .resize(200, 200)
+        .jpeg()
+        .toBuffer();
+      await saveFile(cropKey, crop, "image/jpeg");
+      prepared.push({
+        cropKey,
+        confidence: detection.detection.score,
+        descriptor: Array.from(detection.descriptor),
+        bbox: {
+          x: left / info.width,
+          y: top / info.height,
+          w: width / info.width,
+          h: height / info.height,
+        },
+      });
     }
-
-    // Mark job complete
-    await prisma.mediaProcessingJob.updateMany({
-      where: { mediaId, step: 'THUMBNAIL' },
-      data: { status: 'COMPLETED', doneAt: new Date() }
+    await prisma.$transaction(async (tx) => {
+      if (
+        !(await tx.media.findFirst({
+          where: { id: media.id, deletedAt: null },
+        })) ||
+        !(await tx.mediaProcessingJob.findFirst({
+          where: { id: job.id, leaseId: job.leaseId, status: "PROCESSING" },
+        }))
+      )
+        return;
+      if (
+        await tx.face.findFirst({
+          where: { mediaId: media.id, isVerified: true },
+        })
+      )
+        return;
+      const prior = await tx.face.findMany({
+        where: { mediaId: media.id },
+        select: { personId: true },
+      });
+      await tx.face.deleteMany({ where: { mediaId: media.id } });
+      const existing = await tx.face.findMany({
+        where: {
+          descriptor: { not: null },
+          person: { familyId: media.familyId },
+          media: { familyId: media.familyId, deletedAt: null },
+        },
+        select: { personId: true, descriptor: true },
+      });
+      const touched = new Set(
+        prior.map((f) => f.personId).filter((id): id is string => !!id),
+      );
+      for (const face of prepared) {
+        let personId: string | null = null;
+        let best = 0.55;
+        for (const entry of existing) {
+          try {
+            const other = JSON.parse(entry.descriptor!);
+            if (!Array.isArray(other) || other.length !== 128) continue;
+            const distance = faceapi.euclideanDistance(face.descriptor, other);
+            if (distance < best) {
+              best = distance;
+              personId = entry.personId;
+            }
+          } catch {}
+        }
+        if (!personId)
+          personId = (
+            await tx.person.create({ data: { familyId: media.familyId } })
+          ).id;
+        const created = await tx.face.create({
+          data: {
+            mediaId: media.id,
+            personId,
+            bbox: JSON.stringify(face.bbox),
+            descriptor: JSON.stringify(face.descriptor),
+            cropKey: face.cropKey,
+            confidence: face.confidence,
+          },
+        });
+        existing.push({
+          personId,
+          descriptor: JSON.stringify(face.descriptor),
+        });
+        touched.add(personId);
+        await tx.person.update({
+          where: { id: personId },
+          data: { coverFaceId: created.id },
+        });
+      }
+      for (const id of touched) {
+        const distinct = await tx.face.findMany({
+          where: { personId: id, media: { deletedAt: null } },
+          distinct: ["mediaId"],
+          select: { mediaId: true },
+        });
+        await tx.person.updateMany({
+          where: { id, familyId: media.familyId },
+          data: { photoCount: distinct.length },
+        });
+      }
+      
+      await tx.media.update({
+        where: { id: media.id },
+        data: { processingStatus: "READY" }
+      });
     });
-
-  } catch (error: any) {
-    console.error('Process media failed:', error);
-    await prisma.mediaProcessingJob.updateMany({
-      where: { mediaId, step: 'THUMBNAIL' },
-      data: { status: 'FAILED', error: error.message, doneAt: new Date() }
-    });
-    await prisma.media.update({
-      where: { id: mediaId },
-      data: { processingStatus: 'FAILED' }
-    });
-    throw error;
+  } finally {
+    tf.dispose(tensor);
   }
 }
