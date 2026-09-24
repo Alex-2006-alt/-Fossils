@@ -117,7 +117,7 @@ export default function InvitePage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={6}
+                minLength={12}
                 autoComplete="new-password"
               />
             </div>

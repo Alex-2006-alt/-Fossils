@@ -12,12 +12,15 @@ interface MediaView {
   uploadedAt: Date;
   placeName: string | null;
   processingStatus: string;
-  uploader: {
-    name: string;
-  };
+  uploader: { name: string };
   favorites: unknown[];
+  exifData?: string | null;
 }
 export function toPhotoItem(photo: MediaView): PhotoItem {
+  let exifData: PhotoItem["exifData"] = null;
+  try {
+    exifData = photo.exifData ? JSON.parse(photo.exifData) : null;
+  } catch {}
   return {
     id: photo.id,
     filename: photo.filename,
@@ -32,6 +35,6 @@ export function toPhotoItem(photo: MediaView): PhotoItem {
     isFavorite: photo.favorites.length > 0,
     uploaderName: photo.uploader.name,
     processingStatus: photo.processingStatus as ProcessingStatus,
-    exifData: null,
+    exifData,
   };
 }

@@ -1,3 +1,4 @@
+import type { Prisma } from "@famvault/runtime/client";
 import { NextRequest, NextResponse } from "next/server";
 import { withFamilyAuth } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
@@ -14,17 +15,25 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
 
     // 1. Retrieve all known family members for entity recognition in natural queries
     const familyPeople = await prisma.person.findMany({
-      where: { familyId: ctx.familyId },
+      where: { familyId: ctx.familyId, isHidden: false },
       include: {
         faces: {
           take: 1,
-          where: { cropKey: { not: null } },
+          where: {
+            cropKey: { not: null },
+            media: { familyId: ctx.familyId, deletedAt: null },
+          },
         },
       },
     });
 
     const matchedPersonIds: string[] = [];
-    const matchedPeopleList: { id: string; name: string; photoCount: number; coverUrl: string | null }[] = [];
+    const matchedPeopleList: {
+      id: string;
+      name: string;
+      photoCount: number;
+      coverUrl: string | null;
+    }[] = [];
 
     // Parse natural language keywords if q is present
     let detectedYear: number | null = null;
@@ -46,7 +55,9 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
             id: person.id,
             name: person.name,
             photoCount: person.photoCount,
-            coverUrl: person.faces[0]?.cropKey ? getPublicUrl(person.faces[0].cropKey) : null,
+            coverUrl: person.faces[0]?.cropKey
+              ? getPublicUrl(person.faces[0].cropKey)
+              : null,
           });
         }
       }
@@ -60,7 +71,9 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
           id: person.id,
           name: person.name || "Unknown",
           photoCount: person.photoCount,
-          coverUrl: person.faces[0]?.cropKey ? getPublicUrl(person.faces[0].cropKey) : null,
+          coverUrl: person.faces[0]?.cropKey
+            ? getPublicUrl(person.faces[0].cropKey)
+            : null,
         });
       }
     }
@@ -69,11 +82,10 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
     const activeYear = yearParam ? parseInt(yearParam, 10) : detectedYear;
 
     // Build the query filters
-    const andFilters: any[] = [
+    const andFilters: Prisma.MediaWhereInput[] = [
       {
-        uploader: {
-          familyId: ctx.familyId,
-        },
+        familyId: ctx.familyId,
+        deletedAt: null,
       },
     ];
 
@@ -113,7 +125,7 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
 
     // Text search filter
     if (q) {
-      const orClauses: any[] = [
+      const orClauses: Prisma.MediaWhereInput[] = [
         { filename: { contains: q } },
         { placeName: { contains: q } },
         { tags: { some: { label: { contains: q } } } },
@@ -124,7 +136,7 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
         orClauses.push(
           { filename: { contains: queryWithoutYear } },
           { placeName: { contains: queryWithoutYear } },
-          { tags: { some: { label: { contains: queryWithoutYear } } } }
+          { tags: { some: { label: { contains: queryWithoutYear } } } },
         );
       }
 
@@ -168,7 +180,7 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
 
     // Format results to standard PhotoItem
     const photoItems = photos.map((photo) => {
-      let parsedExif: any = {};
+      let parsedExif: Record<string, unknown> = {};
       try {
         if (photo.exifData) parsedExif = JSON.parse(photo.exifData);
       } catch {}
@@ -200,7 +212,10 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
         tags: photo.tags.map((t) => t.label),
         people: photo.faces
           .filter((f) => f.person)
-          .map((f) => ({ id: f.person!.id, name: f.person!.name || "Unknown" })),
+          .map((f) => ({
+            id: f.person!.id,
+            name: f.person!.name || "Unknown",
+          })),
       };
     });
 
@@ -209,8 +224,8 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
       new Set(
         photos
           .map((p) => p.placeName)
-          .filter((p): p is string => Boolean(p && p.trim().length > 0))
-      )
+          .filter((p): p is string => Boolean(p && p.trim().length > 0)),
+      ),
     );
 
     return NextResponse.json({
@@ -219,11 +234,8 @@ export const GET = withFamilyAuth(async (req: NextRequest, ctx) => {
       matchedPlaces,
       totalCount: photoItems.length,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("GET /api/search error:", error);
-    return NextResponse.json(
-      { error: "Search failed", details: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Search failed" }, { status: 500 });
   }
 });

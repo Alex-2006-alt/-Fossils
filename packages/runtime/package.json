@@ -1,0 +1,17 @@
+{
+  "name": "@famvault/runtime",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "5.22.0",
+    "@aws-sdk/client-s3": "^3.1130.0",
+    "sharp": "^0.35.4",
+    "exif-reader": "^2.0.3",
+    "bcryptjs": "^3.0.3",
+    "zod": "^4.0.0"
+  }
+}

@@ -1,6 +1,12 @@
 "use client";
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "next-auth/react";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import Link from "next/link";
 import { PageHeader, EmptyState, QueryError } from "@/components/Design";
 import Icon from "@/components/Icon";
@@ -8,6 +14,10 @@ import Dialog from "@/components/Dialog";
 import type { AlbumItem, PhotoItem } from "@/types";
 export default function AlbumsPage() {
   const client = useQueryClient();
+  const { data: session } = useSession();
+  const canWrite = ["OWNER", "ADMIN", "MEMBER"].includes(
+    session?.user?.role || "",
+  );
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -22,13 +32,18 @@ export default function AlbumsPage() {
       return res.json();
     },
   });
-  const photos = useQuery<{
+  const photos = useInfiniteQuery<{
     items: PhotoItem[];
+    nextCursor: string | null;
   }>({
+    initialPageParam: "",
+    getNextPageParam: (page) => page.nextCursor || undefined,
     queryKey: ["photos", "album-picker"],
     enabled: open,
-    queryFn: async () => {
-      const res = await fetch("/api/photos?limit=100");
+    queryFn: async ({ pageParam }) => {
+      const res = await fetch(
+        "/api/photos?limit=100&cursor=" + encodeURIComponent(String(pageParam)),
+      );
       if (!res.ok) throw Error("Could not load photos");
       return res.json();
     },
@@ -59,7 +74,11 @@ export default function AlbumsPage() {
         title="Beautifully collected."
         description="A weekend away. A birthday at home. An album for every story."
         action={
-          <button className="btn-primary" onClick={() => setOpen(true)}>
+          <button
+            className="btn-primary"
+            disabled={!canWrite}
+            onClick={() => setOpen(true)}
+          >
             <Icon name="plus" size={16} />
             New album
           </button>
@@ -142,13 +161,14 @@ export default function AlbumsPage() {
           </div>
           <label>Choose photos · {selected.length} selected</label>
           <p className="picker-note">
-            Showing up to 100 photos from your collection.
+            Choose up to 500 photos. Load more to explore your collection.
           </p>
           {photos.isError ? (
             <QueryError retry={() => photos.refetch()} />
           ) : (
             <div className="photo-picker">
-              {photos.data?.items
+              {photos.data?.pages
+                .flatMap((p) => p.items)
                 .filter((p) => p.processingStatus === "READY")
                 .map((photo) => (
                   <button
@@ -160,7 +180,9 @@ export default function AlbumsPage() {
                       setSelected((current) =>
                         current.includes(photo.id)
                           ? current.filter((id) => id !== photo.id)
-                          : [...current, photo.id],
+                          : current.length < 500
+                            ? [...current, photo.id]
+                            : current,
                       )
                     }
                   >
@@ -173,6 +195,16 @@ export default function AlbumsPage() {
                   </button>
                 ))}
             </div>
+          )}
+          {photos.hasNextPage && (
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={photos.isFetchingNextPage}
+              onClick={() => photos.fetchNextPage()}
+            >
+              Load more photos
+            </button>
           )}
           {create.isError && (
             <p className="form-alert" role="alert">

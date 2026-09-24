@@ -44,7 +44,10 @@ export default function HomePage() {
   }>({
     queryKey: ["on-this-day"],
     queryFn: async () => {
-      const res = await fetch("/api/memories/on-this-day");
+      const res = await fetch(
+        "/api/memories/on-this-day?timeZone=" +
+          encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone),
+      );
       if (!res.ok) throw Error("Could not load memories");
       return res.json();
     },

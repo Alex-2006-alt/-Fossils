@@ -35,7 +35,11 @@ export default function UploadZone({
       const res = await fetch("/api/photos", { method: "POST", body: form });
       const result = await res.json();
       if (!res.ok || !result.uploaded?.length)
-        throw Error(result.error || "Upload failed. Please try again.");
+        throw Error(
+          result.error ||
+            result.errors?.[0]?.error ||
+            "Upload failed. Please try again.",
+        );
       setUploads((items) =>
         items.map((i) => (i.id === item.id ? { ...i, status: "queued" } : i)),
       );
@@ -61,13 +65,13 @@ export default function UploadZone({
       id: crypto.randomUUID(),
       file,
       status:
-        !file.type.startsWith("image/") || file.size > 50 * 1024 * 1024
+        !file.type.startsWith("image/") || file.size > 25 * 1024 * 1024
           ? "error"
           : "uploading",
       message: !file.type.startsWith("image/")
         ? "Choose an image file."
-        : file.size > 50 * 1024 * 1024
-          ? "This photo exceeds 50 MB."
+        : file.size > 25 * 1024 * 1024
+          ? "This photo exceeds 25 MB."
           : undefined,
     }));
     setUploads((items) => [...items, ...additions]);
@@ -109,7 +113,7 @@ export default function UploadZone({
         <strong>
           {busy ? "Adding your moments…" : "Drop a little happiness here."}
         </strong>
-        <small>Or click to choose photos · up to 50 MB each</small>
+        <small>Or click to choose photos · up to 25 MB each</small>
       </button>
       <input
         ref={input}
@@ -146,7 +150,7 @@ export default function UploadZone({
               </span>
             </div>
             {item.status === "error" &&
-              !item.message?.includes("50 MB") &&
+              !item.message?.includes("25 MB") &&
               item.file.type.startsWith("image/") && (
                 <button disabled={busy} onClick={() => send(item)}>
                   Retry

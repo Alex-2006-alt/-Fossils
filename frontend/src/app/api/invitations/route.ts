@@ -1,120 +1,70 @@
-import { NextRequest, NextResponse } from "next/server";
-import { withFamilyAuth, getClientIp } from "@/lib/api-auth";
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { withFamilyAuth } from "@/lib/api-auth";
 import { prisma } from "@/lib/db";
-import { logAudit } from "@/lib/audit";
-
-/**
- * GET /api/invitations — List all invitations for the family.
- */
+import {
+  jsonBody,
+  emailSchema,
+  newToken,
+  tokenHash,
+  HttpError,
+} from "@famvault/runtime/security";
 export const GET = withFamilyAuth(
-  async (req, ctx) => {
-    const invitations = await prisma.invitation.findMany({
-      where: { familyId: ctx.familyId },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    });
-
-    return NextResponse.json({
-      items: invitations.map((inv) => ({
-        id: inv.id,
-        email: inv.email,
-        role: inv.role,
-        token: inv.token,
-        expiresAt: inv.expiresAt.toISOString(),
-        usedAt: inv.usedAt?.toISOString() || null,
-        createdAt: inv.createdAt.toISOString(),
-      })),
-    });
-  },
-  { minRole: "ADMIN" }
+  async (_, ctx) =>
+    NextResponse.json({
+      items: await prisma.invitation.findMany({
+        where: { familyId: ctx.familyId },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          expiresAt: true,
+          usedAt: true,
+          createdAt: true,
+        },
+      }),
+    }),
+  { minRole: "ADMIN" },
 );
-
-/**
- * POST /api/invitations — Create a new invitation link.
- * Requires ADMIN role.
- */
 export const POST = withFamilyAuth(
-  async (req: NextRequest, ctx) => {
-    const { email, role } = await req.json();
-
-    // Validate role — can only assign roles lower than your own
-    const assignableRoles = ["MEMBER", "VIEWER"];
-    if (ctx.role === "OWNER") assignableRoles.push("ADMIN");
-    
-    const assignRole = role || "MEMBER";
-    if (!assignableRoles.includes(assignRole)) {
-      return NextResponse.json(
-        { error: `Cannot assign role: ${assignRole}` },
-        { status: 400 }
-      );
-    }
-
-    // Create invitation (valid for 7 days)
-    const invitation = await prisma.invitation.create({
+  async (req, ctx) => {
+    const body = z
+      .object({
+        email: emailSchema.nullish(),
+        role: z.enum(["MEMBER", "VIEWER", "ADMIN"]).default("MEMBER"),
+      })
+      .parse(await jsonBody(req));
+    if (body.role === "ADMIN" && ctx.role !== "OWNER")
+      throw new HttpError(403, "Only the owner can invite administrators");
+    const token = newToken();
+    const row = await prisma.invitation.create({
       data: {
         familyId: ctx.familyId,
-        email: email || null,
-        role: assignRole,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        email: body.email || null,
+        role: body.role,
+        token: tokenHash(token),
+        expiresAt: new Date(Date.now() + 7 * 86400000),
         createdBy: ctx.userId,
       },
     });
-
-    // Build invite URL
-    const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-    const inviteUrl = `${baseUrl}/invite/${invitation.token}`;
-
-    // Audit log
-    await logAudit({
-      familyId: ctx.familyId,
-      userId: ctx.userId,
-      action: "INVITE_CREATE",
-      resourceType: "INVITATION",
-      resourceId: invitation.id,
-      details: { email, role: assignRole, expiresAt: invitation.expiresAt },
-      ipAddress: getClientIp(req),
-    });
-
     return NextResponse.json(
-      {
-        id: invitation.id,
-        token: invitation.token,
-        inviteUrl,
-        expiresAt: invitation.expiresAt.toISOString(),
-      },
-      { status: 201 }
+      { id: row.id, token, expiresAt: row.expiresAt },
+      { status: 201 },
     );
   },
-  { minRole: "ADMIN" }
+  { minRole: "ADMIN" },
 );
-
-/**
- * DELETE /api/invitations — Revoke an invitation.
- */
 export const DELETE = withFamilyAuth(
-  async (req: NextRequest, ctx) => {
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
-
-    if (!id) {
-      return NextResponse.json(
-        { error: "Invitation ID required" },
-        { status: 400 }
-      );
-    }
-
-    const invitation = await prisma.invitation.findUnique({ where: { id } });
-
-    if (!invitation || invitation.familyId !== ctx.familyId) {
-      return NextResponse.json(
-        { error: "Invitation not found" },
-        { status: 404 }
-      );
-    }
-
-    await prisma.invitation.delete({ where: { id } });
-
+  async (req, ctx) => {
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) throw new HttpError(400, "Invitation ID required");
+    const result = await prisma.invitation.deleteMany({
+      where: { id, familyId: ctx.familyId },
+    });
+    if (!result.count) throw new HttpError(404, "Invitation not found");
     return NextResponse.json({ success: true });
   },
-  { minRole: "ADMIN" }
+  { minRole: "ADMIN" },
 );

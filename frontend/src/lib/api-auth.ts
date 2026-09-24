@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "./auth";
 import { prisma } from "./db";
-import { Role, hasRole } from "@/types";
-
-// ════════════════════════════════════════════════════════════
-// FamVault — API Auth & Authorization Middleware
-// ════════════════════════════════════════════════════════════
-
+import { type Role, hasRole } from "@/types";
+import { checkOrigin, HttpError } from "@famvault/runtime/security";
+import { rateLimit, clientIp } from "@famvault/runtime/rate-limit";
+import { apiError } from "./http";
 export interface AuthContext {
   userId: string;
   userName: string;
@@ -14,105 +12,46 @@ export interface AuthContext {
   role: Role;
   familyId: string;
 }
-
-type AuthenticatedHandler = (
+type Handler = (
   req: NextRequest,
   ctx: AuthContext,
-  params?: Record<string, string>
-) => Promise<NextResponse>;
-
-/**
- * Wraps an API route handler with authentication and family-boundary enforcement.
- *
- * @param handler - The handler function that receives the authenticated context
- * @param options.minRole - Minimum role required (default: VIEWER)
- *
- * Usage:
- * ```ts
- * export const GET = withFamilyAuth(async (req, ctx) => {
- *   // ctx.userId, ctx.familyId, ctx.role are guaranteed
- *   const photos = await prisma.media.findMany({
- *     where: { uploader: { familyId: ctx.familyId } }
- *   });
- *   return NextResponse.json(photos);
- * });
- * ```
- */
-export function withFamilyAuth(
-  handler: AuthenticatedHandler,
-  options?: { minRole?: Role }
-) {
-  const minRole = options?.minRole ?? "VIEWER";
-
-  return async (req: NextRequest, routeContext?: { params?: Promise<Record<string, string>> }) => {
+  params?: Record<string, string>,
+) => Promise<NextResponse | Response>;
+export function withFamilyAuth(handler: Handler, options?: { minRole?: Role }) {
+  return async (
+    req: NextRequest,
+    routeContext?: { params?: Promise<Record<string, string>> },
+  ) => {
     try {
-      // 1. Check session
+      checkOrigin(req);
       const session = await auth();
-      if (!session?.user?.id) {
-        return NextResponse.json(
-          { error: "Authentication required" },
-          { status: 401 }
-        );
-      }
-
-      // 2. Load user with family
+      if (!session?.user?.id)
+        throw new HttpError(401, "Authentication required");
       const user = await prisma.user.findUnique({
         where: { id: session.user.id },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          role: true,
-          familyId: true,
-        },
       });
-
-      if (!user) {
-        return NextResponse.json(
-          { error: "User not found" },
-          { status: 404 }
-        );
-      }
-
-      // 3. Check role
-      const userRole = user.role as Role;
-      if (!hasRole(userRole, minRole)) {
-        return NextResponse.json(
-          { error: "Insufficient permissions" },
-          { status: 403 }
-        );
-      }
-
-      // 4. Build auth context
-      const ctx: AuthContext = {
-        userId: user.id,
-        userName: user.name,
-        email: user.email,
-        role: userRole,
-        familyId: user.familyId,
-      };
-
-      // 5. Resolve route params if present
-      const params = routeContext?.params ? await routeContext.params : undefined;
-
-      return handler(req, ctx, params);
-    } catch (error) {
-      console.error("Auth middleware error:", error);
-      return NextResponse.json(
-        { error: "Internal server error" },
-        { status: 500 }
+      if (!user || user.disabledAt)
+        throw new HttpError(401, "Authentication required");
+      if (!hasRole(user.role as Role, options?.minRole ?? "VIEWER"))
+        throw new HttpError(403, "Insufficient permissions");
+      if (!["GET", "HEAD"].includes(req.method))
+        await rateLimit("mutation:" + user.id, 120, 60000);
+      const response = await handler(
+        req,
+        {
+          userId: user.id,
+          userName: user.name,
+          email: user.email,
+          role: user.role as Role,
+          familyId: user.familyId,
+        },
+        routeContext?.params ? await routeContext.params : undefined,
       );
+      response.headers.set("Cache-Control", "private, no-store");
+      return response;
+    } catch (error) {
+      return apiError(error);
     }
   };
 }
-
-/**
- * Helper to extract client IP from request headers.
- */
-export function getClientIp(req: NextRequest): string | null {
-  return (
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    null
-  );
-}
+export const getClientIp = (req: NextRequest) => clientIp(req);

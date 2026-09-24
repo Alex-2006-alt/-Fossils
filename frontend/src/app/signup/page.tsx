@@ -32,7 +32,7 @@ export default function SignupPage() {
         throw Error(data.error || "We couldn’t create your account.");
       setSuccess(
         mode === "create"
-          ? `Your family archive is ready. Your invitation code is ${data.inviteCode}. Save it to invite your family.`
+          ? "Your family archive is ready. Sign in and open Family to create invitation links."
           : "You’re part of the family. Sign in to open your archive.",
       );
     } catch (error) {
@@ -107,14 +107,14 @@ export default function SignupPage() {
                 autoComplete="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                minLength={6}
+                minLength={12}
                 required
-                placeholder="At least 6 characters"
+                placeholder="At least 12 characters"
               />
             </div>
             <div className="field-group">
               <label htmlFor="family-field">
-                {mode === "create" ? "Family name" : "Invitation code"}
+                {mode === "create" ? "Family name" : "Invitation token"}
               </label>
               <input
                 className="input-field"

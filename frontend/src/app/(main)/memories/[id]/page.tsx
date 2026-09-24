@@ -1,4 +1,5 @@
 "use client";
+import CollectionControls from "@/components/CollectionControls";
 import { use } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
@@ -72,6 +73,11 @@ export default function MemoryPage({
                 {query.data.memory.story}
               </blockquote>
             )}
+            <CollectionControls
+              kind="memories"
+              id={query.data.memory.id}
+              title={query.data.memory.title}
+            />
             <CollectionDetail key={id} photos={query.data.photos} />
           </>
         )

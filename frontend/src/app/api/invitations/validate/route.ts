@@ -1,49 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-
-/**
- * GET /api/invitations/validate?token=xxx — Validate an invitation token (public).
- */
+import { apiError } from "@/lib/http";
+import { HttpError, tokenHash } from "@famvault/runtime/security";
+import { rateLimit, clientIp } from "@famvault/runtime/rate-limit";
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const token = searchParams.get("token");
-
-  if (!token) {
+  try {
+    await rateLimit("invite-check:" + clientIp(req), 30, 60000);
+    const token = new URL(req.url).searchParams.get("token");
+    if (!token || token.length > 200)
+      throw new HttpError(400, "Invalid invitation");
+    const row = await prisma.invitation.findUnique({
+      where: { token: tokenHash(token) },
+      include: { family: { select: { name: true } } },
+    });
+    if (!row || row.usedAt || row.expiresAt <= new Date())
+      throw new HttpError(400, "Invitation is invalid or expired");
     return NextResponse.json(
-      { error: "Token is required" },
-      { status: 400 }
+      { familyName: row.family.name, role: row.role },
+      {
+        headers: {
+          "Cache-Control": "no-store",
+          "Referrer-Policy": "no-referrer",
+        },
+      },
     );
+  } catch (error) {
+    return apiError(error);
   }
-
-  const invitation = await prisma.invitation.findUnique({
-    where: { token },
-    include: { family: { select: { name: true } } },
-  });
-
-  if (!invitation) {
-    return NextResponse.json(
-      { error: "Invalid invitation link" },
-      { status: 404 }
-    );
-  }
-
-  if (invitation.usedAt) {
-    return NextResponse.json(
-      { error: "This invitation has already been used" },
-      { status: 400 }
-    );
-  }
-
-  if (invitation.expiresAt < new Date()) {
-    return NextResponse.json(
-      { error: "This invitation has expired" },
-      { status: 400 }
-    );
-  }
-
-  return NextResponse.json({
-    familyName: invitation.family.name,
-    email: invitation.email, // may be null
-    role: invitation.role,
-  });
 }

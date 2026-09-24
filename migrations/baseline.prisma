@@ -1,0 +1,510 @@
+// ════════════════════════════════════════════════════════════
+// FamVault — Prisma Schema (Full V1)
+// Private AI-Powered Family Memory Platform
+// ════════════════════════════════════════════════════════════
+
+generator client {
+  provider        = "prisma-client-js"
+}
+
+datasource db {
+  provider   = "sqlite"
+  url        = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════
+// CORE: Identity & Access
+// ═══════════════════════════════════════════════════════════
+
+/// Family vault — the top-level privacy boundary.
+/// Every piece of data is scoped to a family.
+model Family {
+  id         String   @id @default(cuid())
+  name       String
+  inviteCode String   @unique
+  avatarUrl  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  members     User[]
+  albums      Album[]
+  people      Person[]
+  memories    Memory[]
+  milestones  FamilyMilestone[]
+  feedEvents  FeedEvent[]
+  guestLinks  GuestUploadLink[]
+  capsules    MemoryCapsule[]
+  treeNodes   FamilyTreeNode[]
+  invitations Invitation[]
+  auditLogs   AuditLog[]
+}
+
+/// Registered user — belongs to exactly one family.
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String   // bcrypt hashed
+  role      String   @default("MEMBER") // OWNER | ADMIN | MEMBER | VIEWER | GUEST
+  avatarUrl String?
+  familyId  String
+  family    Family   @relation(fields: [familyId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  media         Media[]
+  favorites     Favorite[]
+  comments      Comment[]
+  reactions     Reaction[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+  voiceMemories VoiceMemory[]
+  capsules      MemoryCapsule[] @relation("CapsuleCreator")
+
+  @@index([familyId])
+}
+
+/// Invite tokens for onboarding new family members.
+model Invitation {
+  id        String    @id @default(cuid())
+  familyId  String
+  family    Family    @relation(fields: [familyId], references: [id])
+  email     String?   // optional: restrict invite to specific email
+  role      String    @default("MEMBER") // role assigned on join
+  token     String    @unique @default(cuid())
+  expiresAt DateTime
+  usedAt    DateTime?
+  usedById  String?
+  createdBy String    // userId of inviter
+  createdAt DateTime  @default(now())
+
+  @@index([token])
+  @@index([familyId])
+}
+
+// ═══════════════════════════════════════════════════════════
+// MEDIA: Photos & Videos
+// ═══════════════════════════════════════════════════════════
+
+/// A single photo or video uploaded to the vault.
+model Media {
+  id               String   @id @default(cuid())
+  filename         String
+  originalKey      String   // R2 object key for original
+  thumbKey         String   // R2 object key for thumbnail (300px)
+  mediumKey        String?  // R2 object key for medium-res (1200px)
+  mimeType         String
+  width            Int
+  height           Int
+  sizeBytes        Int
+  takenAt          DateTime? // from EXIF
+  uploadedAt       DateTime  @default(now())
+  latitude         Float?
+  longitude        Float?
+  placeName        String?   // reverse-geocoded
+  exifData         String?   // JSON string of full EXIF
+  blurHash         String?   // blurhash placeholder
+  checksum         String?   // SHA-256 for exact duplicate detection
+  pHash            String?   // perceptual hash for near-duplicate detection
+  duration         Int?      // video duration in seconds
+  processingStatus String    @default("UPLOADED")
+  // UPLOADED | VALIDATING | THUMBNAIL_DONE | METADATA_DONE
+  // FACE_DONE | AI_DONE | INDEXED | READY | FAILED
+
+  // Owner
+  uploaderId String
+  uploader   User   @relation(fields: [uploaderId], references: [id])
+
+  // Relations
+  faces          Face[]
+  albumMedia     AlbumMedia[]
+  memoryMedia    MemoryMedia[]
+  favorites      Favorite[]
+  comments       Comment[]
+  tags           Tag[]
+  voiceMemories  VoiceMemory[]
+  searchEmbedding SearchEmbedding?
+  processingJobs  MediaProcessingJob[]
+
+  @@index([uploadedAt])
+  @@index([takenAt])
+  @@index([uploaderId])
+  @@index([processingStatus])
+  @@index([checksum])
+}
+
+/// Tracks the processing pipeline state for each media item.
+model MediaProcessingJob {
+  id        String   @id @default(cuid())
+  mediaId   String
+  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  step      String   // THUMBNAIL | METADATA | FACE | EMBEDDING | CLASSIFICATION | INDEX
+  status    String   @default("PENDING") // PENDING | PROCESSING | COMPLETED | FAILED
+  error     String?
+  retries   Int      @default(0)
+  startedAt DateTime?
+  doneAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([mediaId])
+  @@index([status])
+}
+
+// ═══════════════════════════════════════════════════════════
+// PEOPLE: Face Recognition & Profiles
+// ═══════════════════════════════════════════════════════════
+
+/// A recognized person in the family (cluster of faces).
+model Person {
+  id          String   @id @default(cuid())
+  familyId    String
+  family      Family   @relation(fields: [familyId], references: [id])
+  name        String?  // user-assigned name (null = unnamed cluster)
+  isHidden    Boolean  @default(false)
+  coverFaceId String?  // best face crop to show as avatar
+  photoCount  Int      @default(0) // denormalized count for fast display
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  faces       Face[]
+  aliases     PersonAlias[]
+  treeNode    FamilyTreeNode?
+  milestones  FamilyMilestone[]
+
+  @@index([familyId])
+}
+
+/// Alias/alternate names for a person.
+model PersonAlias {
+  id       String @id @default(cuid())
+  personId String
+  person   Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+  alias    String
+
+  @@index([personId])
+}
+
+/// A detected face within a specific media item.
+model Face {
+  id         String   @id @default(cuid())
+  mediaId    String
+  media      Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  personId   String?
+  person     Person?  @relation(fields: [personId], references: [id], onDelete: SetNull)
+  bbox       String   @default("{}") // JSON string {x, y, w, h} normalized 0-1
+  cropKey    String?  // R2 key for face crop image
+  confidence Float    @default(0)
+  isVerified Boolean  @default(false) // user-confirmed match
+  descriptor String?  // 128-d float array JSON string for in-memory SQLite clustering
+  createdAt  DateTime @default(now())
+
+  @@index([mediaId])
+  @@index([personId])
+}
+
+// ═══════════════════════════════════════════════════════════
+// ALBUMS & ORGANIZATION
+// ═══════════════════════════════════════════════════════════
+
+/// A collection of media items.
+model Album {
+  id           String      @id @default(cuid())
+  familyId     String
+  family       Family      @relation(fields: [familyId], references: [id])
+  title        String
+  description  String?
+  coverMediaId String?
+  type         String      @default("MANUAL") // MANUAL | SMART | EVENT | AI
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  // Relations
+  media AlbumMedia[]
+
+  @@index([familyId])
+  @@index([type])
+}
+
+/// Join table: Album ↔ Media
+model AlbumMedia {
+  albumId String
+  album   Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  mediaId String
+  media   Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  order   Int      @default(0)
+  addedAt DateTime @default(now())
+
+  @@id([albumId, mediaId])
+}
+
+/// Auto-tagging labels attached to media.
+model Tag {
+  id      String @id @default(cuid())
+  mediaId String
+  media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  label   String // e.g. "beach", "birthday", "dog", "sunset"
+  source  String @default("AI") // AI | USER
+  confidence Float @default(1.0)
+
+  @@index([mediaId])
+  @@index([label])
+}
+
+// ═══════════════════════════════════════════════════════════
+// MEMORIES: AI-Generated Stories
+// ═══════════════════════════════════════════════════════════
+
+/// An AI-generated or user-curated memory (event cluster).
+model Memory {
+  id           String   @id @default(cuid())
+  familyId     String
+  family       Family   @relation(fields: [familyId], references: [id])
+  title        String   // "Goa Family Trip"
+  subtitle     String?  // "July 14–17, 2025"
+  coverMediaId String?
+  story        String?  // AI-generated narrative
+  dateFrom     DateTime
+  dateTo       DateTime
+  locationName String?
+  mediaCount   Int      @default(0)
+  peopleIds    String   @default("[]") // JSON array of Person IDs
+  status       String   @default("DRAFT") // DRAFT | PUBLISHED | ARCHIVED
+  isAuto       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  media MemoryMedia[]
+
+  @@index([familyId])
+  @@index([dateFrom])
+}
+
+/// Join table: Memory ↔ Media
+model MemoryMedia {
+  memoryId String
+  memory   Memory   @relation(fields: [memoryId], references: [id], onDelete: Cascade)
+  mediaId  String
+  media    Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  order    Int      @default(0)
+  addedAt  DateTime @default(now())
+
+  @@id([memoryId, mediaId])
+}
+
+// ═══════════════════════════════════════════════════════════
+// SOCIAL: Engagement & Feed
+// ═══════════════════════════════════════════════════════════
+
+/// Favorited media items per user.
+model Favorite {
+  userId  String
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaId String
+  media   Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  addedAt DateTime @default(now())
+
+  @@id([userId, mediaId])
+}
+
+/// Comments on media items.
+model Comment {
+  id        String   @id @default(cuid())
+  mediaId   String
+  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([mediaId])
+}
+
+/// Emoji reactions on feed events.
+model Reaction {
+  id          String   @id @default(cuid())
+  feedEventId String
+  feedEvent   FeedEvent @relation(fields: [feedEventId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emoji       String   // ❤️ 😊 😂
+  createdAt   DateTime @default(now())
+
+  @@unique([feedEventId, userId, emoji])
+}
+
+/// Private family activity feed.
+model FeedEvent {
+  id        String   @id @default(cuid())
+  familyId  String
+  family    Family   @relation(fields: [familyId], references: [id])
+  userId    String   // who triggered this event
+  type      String   // UPLOAD | MEMORY_CREATED | MILESTONE | CAPSULE_UNLOCKED | ALBUM_CREATED
+  title     String
+  mediaIds  String   @default("[]") // JSON array of media IDs
+  createdAt DateTime @default(now())
+
+  // Relations
+  reactions Reaction[]
+
+  @@index([familyId])
+  @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════════════════════
+// FAMILY: Legacy & Milestones
+// ═══════════════════════════════════════════════════════════
+
+/// Important family dates and events.
+model FamilyMilestone {
+  id        String   @id @default(cuid())
+  familyId  String
+  family    Family   @relation(fields: [familyId], references: [id])
+  type      String   // BIRTHDAY | WEDDING | GRADUATION | BIRTH | ANNIVERSARY | TRIP | NEW_HOME | OTHER
+  title     String
+  date      DateTime
+  personId  String?  // linked Person if applicable
+  person    Person?  @relation(fields: [personId], references: [id], onDelete: SetNull)
+  mediaId   String?  // cover photo
+  createdAt DateTime @default(now())
+
+  @@index([familyId])
+  @@index([date])
+}
+
+/// Family tree node.
+model FamilyTreeNode {
+  id           String    @id @default(cuid())
+  familyId     String
+  family       Family    @relation(fields: [familyId], references: [id])
+  personId     String?   @unique // links to People
+  person       Person?   @relation(fields: [personId], references: [id], onDelete: SetNull)
+  displayName  String
+  birthday     DateTime?
+  relationship String    // GRANDPARENT | PARENT | CHILD | SIBLING | SPOUSE | OTHER
+  parentIds    String   @default("[]") // JSON array of FamilyTreeNode IDs
+  photoMediaId String?   // cover photo
+  createdAt    DateTime  @default(now())
+
+  @@index([familyId])
+}
+
+// ═══════════════════════════════════════════════════════════
+// SPECIAL FEATURES
+// ═══════════════════════════════════════════════════════════
+
+/// Guest upload link for events (weddings, birthdays).
+model GuestUploadLink {
+  id         String    @id @default(cuid())
+  familyId   String
+  family     Family    @relation(fields: [familyId], references: [id])
+  eventName  String
+  token      String    @unique @default(cuid())
+  expiresAt  DateTime
+  maxPhotos  Int       @default(500)
+  uploadCount Int      @default(0)
+  isApproved Boolean   @default(false)
+  createdBy  String    // userId
+  createdAt  DateTime  @default(now())
+
+  @@index([token])
+}
+
+/// Time-locked memory capsule.
+model MemoryCapsule {
+  id          String   @id @default(cuid())
+  familyId    String
+  family      Family   @relation(fields: [familyId], references: [id])
+  createdById String
+  createdBy   User     @relation("CapsuleCreator", fields: [createdById], references: [id])
+  title       String
+  message     String?
+  voiceKey    String?  // R2 key for voice recording
+  mediaIds    String   @default("[]") // JSON array of media IDs
+  unlocksAt   DateTime
+  isUnlocked  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([familyId])
+  @@index([unlocksAt])
+}
+
+/// Voice recording attached to a photo or memory.
+model VoiceMemory {
+  id         String   @id @default(cuid())
+  mediaId    String?
+  media      Media?   @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  recordedBy String
+  recorder   User     @relation(fields: [recordedBy], references: [id])
+  audioKey   String   // R2 key
+  transcript String?  // Whisper STT output
+  duration   Int      // seconds
+  createdAt  DateTime @default(now())
+
+  @@index([mediaId])
+}
+
+// ═══════════════════════════════════════════════════════════
+// SEARCH & AI
+// ═══════════════════════════════════════════════════════════
+
+/// CLIP/AI embedding for semantic search.
+/// Note: The actual vector column is managed via raw SQL migration
+/// since Prisma doesn't natively support pgvector types.
+model SearchEmbedding {
+  id        String   @id @default(cuid())
+  mediaId   String   @unique
+  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  caption   String?  // BLIP-generated caption
+  tags      String   @default("[]") // JSON array of scene/object tags
+  createdAt DateTime @default(now())
+
+  @@index([mediaId])
+}
+
+// ═══════════════════════════════════════════════════════════
+// SYSTEM: Notifications, Audit, Security
+// ═══════════════════════════════════════════════════════════
+
+/// In-app notifications.
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // MEMORY | MILESTONE | UPLOAD | CAPSULE | PEOPLE | SYSTEM
+  title     String
+  body      String?
+  imageUrl  String?  // optional thumbnail
+  linkUrl   String?  // deep link within app
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+/// Audit log for security-sensitive actions.
+model AuditLog {
+  id           String   @id @default(cuid())
+  familyId     String
+  family       Family   @relation(fields: [familyId], references: [id])
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action       String   // LOGIN | UPLOAD | DELETE | ROLE_CHANGE | INVITE | SETTINGS_CHANGE | etc
+  resourceType String?  // MEDIA | ALBUM | PERSON | MEMBER | etc
+  resourceId   String?
+  details      String?  // JSON string for extra context
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  @@index([familyId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
+}

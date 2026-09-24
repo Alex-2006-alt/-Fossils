@@ -5,6 +5,7 @@
 
 generator client {
   provider        = "prisma-client-js"
+  output = "../../packages/runtime/generated"
 }
 
 datasource db {
@@ -21,6 +22,8 @@ datasource db {
 model Family {
   id         String   @id @default(cuid())
   name       String
+  faceRecognitionEnabled Boolean @default(false)
+  locationVisible Boolean @default(true)
   inviteCode String   @unique
   avatarUrl  String?
   createdAt  DateTime @default(now())
@@ -46,6 +49,9 @@ model User {
   name      String
   email     String   @unique
   password  String   // bcrypt hashed
+  sessionVersion Int @default(0)
+  disabledAt DateTime?
+  emailVerifiedAt DateTime?
   role      String   @default("MEMBER") // OWNER | ADMIN | MEMBER | VIEWER | GUEST
   avatarUrl String?
   familyId  String
@@ -90,6 +96,10 @@ model Invitation {
 
 /// A single photo or video uploaded to the vault.
 model Media {
+  purgeStartedAt DateTime?
+  familyId String @default("")
+  deletedAt DateTime?
+  @@index([familyId, deletedAt])
   id               String   @id @default(cuid())
   filename         String
   originalKey      String   // R2 object key for original
@@ -137,6 +147,7 @@ model Media {
 
 /// Tracks the processing pipeline state for each media item.
 model MediaProcessingJob {
+  leaseId String?
   id        String   @id @default(cuid())
   mediaId   String
   media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
@@ -507,4 +518,34 @@ model AuditLog {
   @@index([userId])
   @@index([createdAt])
   @@index([action])
+}
+
+model RateLimitBucket {
+ id String @id
+ count Int @default(0)
+ expiresAt DateTime
+ @@index([expiresAt])
+}
+model AccountToken {
+ id String @id @default(cuid())
+ tokenHash String @unique
+ userId String
+ purpose String
+ expiresAt DateTime
+ usedAt DateTime?
+ @@index([userId])
+}
+
+model FamilyJob {
+ id String @id @default(cuid())
+ familyId String
+ type String
+ status String @default("PENDING")
+ leaseId String?
+ startedAt DateTime?
+ doneAt DateTime?
+ retries Int @default(0)
+ createdAt DateTime @default(now())
+ @@unique([familyId,type])
+ @@index([status])
 }
