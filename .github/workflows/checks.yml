@@ -9,6 +9,8 @@ jobs:
       APP_URL: http://localhost:3000
       NEXTAUTH_URL: http://localhost:3000
       AUTH_SECRET: ci-only-non-production-secret-at-least-32-characters
+      NEXTAUTH_SECRET: ci-only-non-production-secret-at-least-32-characters
+      STORAGE_PROVIDER: local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
